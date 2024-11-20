@@ -54,7 +54,7 @@ subroutine dos_sparse
 
    if (OmegaNum<2) OmegaNum=2
    NE= OmegaNum
-   sigma=(1d0,0d0)*E_arc
+   sigma=(1d0,0d0)*iso_energy
    nnzmax=splen+ Ndimq
    nnz=splen
 
@@ -79,7 +79,7 @@ subroutine dos_sparse
    emax= OmegaMax
 
    eta_array=(/0.1d0, 0.2d0, 0.4d0, 0.8d0, 1.0d0, 2d0, 4d0, 8d0, 10d0/)
-   eta_array= eta_array*Eta_Arc
+   eta_array= eta_array*Fermi_broadening
 
    !eta= (emax- emin)/ dble(NE)*3d0
 
@@ -155,7 +155,7 @@ subroutine dos_sparse
    if (cpuid==0) then
       open(unit=outfileindex, file='dos.gnu')
       write(outfileindex, '(a)')"set encoding iso_8859_1"
-      write(outfileindex, '(a)')'set terminal  pdf enhanced color font ",14" '
+      write(outfileindex, '(a)')'set terminal pdf enhanced color font ",16" size 5,4'
       write(outfileindex, '(a)')"set output 'dos.pdf'"
       write(outfileindex, '(a)')'set border lw 2'
       write(outfileindex, '(a)')'set autoscale fix'
@@ -245,7 +245,7 @@ subroutine charge_density_sparse
 
    if (OmegaNum<2) OmegaNum=2
    NE= OmegaNum
-   sigma=(1d0,0d0)*E_arc
+   sigma=(1d0,0d0)*iso_energy
    nnzmax=splen+ Ndimq
    nnz=splen
 
@@ -352,7 +352,6 @@ subroutine charge_density_sparse
 end subroutine charge_density_sparse
 
 
-
 subroutine dos_sub
 !> calculate density of state for 3D bulk system
 !
@@ -418,7 +417,7 @@ subroutine dos_sub
    emin= OmegaMin
    emax= OmegaMax
    eta_array=(/0.1d0, 0.2d0, 0.4d0, 0.8d0, 1.0d0, 2d0, 4d0, 8d0, 10d0/)
-   eta_array= eta_array*Eta_Arc
+   eta_array= eta_array*Fermi_broadening
 
 
    !> energy
@@ -446,7 +445,12 @@ subroutine dos_sub
          + K3D_vec2_cube*(iky-1)/dble(nk2)  &
          + K3D_vec3_cube*(ikz-1)/dble(nk3)
 
-      call ham_bulk_atomicgauge(k, Hk)
+      if (index(KPorTB, 'KP')/=0)then
+         call ham_bulk_kp_abcb_graphene(k, Hk)
+      else
+         call ham_bulk_atomicgauge(k, Hk)
+      endif
+
       W= 0d0
       call eigensystem_c( 'N', 'U', Num_wann ,Hk, W)
       eigval(:)= W(iband_low:iband_high)
@@ -496,8 +500,8 @@ subroutine dos_sub
    if (cpuid==0) then
       open(unit=outfileindex, file='dos.gnu')
       write(outfileindex, '(a)')"set encoding iso_8859_1"
-      write(outfileindex, '(a)')'set terminal  postscript enhanced color font ",24" '
-      write(outfileindex, '(a)')"set output 'dos.eps'"
+      write(outfileindex, '(a)')'set terminal pdf enhanced color font ",16" size 5,4 '
+      write(outfileindex, '(a)')"set output 'dos.pdf'"
       write(outfileindex, '(a)')'set border lw 2'
       write(outfileindex, '(a)')'set autoscale fix'
       write(outfileindex, '(a, f16.6,a)')'set yrange [0:', maxval(dos)*eV2Hartree+0.5, '1]'
@@ -531,6 +535,186 @@ subroutine dos_sub
    return
 end subroutine dos_sub
 
+
+
+subroutine dos_slab
+!> calculate density of state for slab system
+!
+!> DOS(\omega)= \sum_k \delta(\omega- E(k))
+
+   use wmpi
+   use para
+   implicit none
+
+   !> the integration k space
+   real(dp) :: emin, emax
+
+   integer :: ik,ie,ib,ikx,iky,ikz,ieta
+   integer :: knv2_slab,NE,ierr, ndim_slab
+   integer :: NumberofEta
+
+   !> integration for band
+   integer :: iband_low,iband_high,iband_tot
+
+   real(dp) :: x, dk2, eta0
+
+   real(dp) :: k(2)
+   real(dp) :: time_start, time_end
+
+   real(dp), allocatable :: eigval(:)
+   real(dp), allocatable :: W(:)
+   real(dp), allocatable :: omega(:)
+   real(dp), allocatable :: dos(:, :)
+   real(dp), allocatable :: dos_mpi(:, :)
+   real(dp), allocatable :: eta_array(:)
+   complex(dp), allocatable :: Hk(:, :)
+
+   !> delta function
+   real(dp), external :: delta
+
+   knv2_slab= Nk1*Nk2
+   ndim_slab= Num_wann*Nslab
+
+   if (OmegaNum<2) OmegaNum=2
+   NE= OmegaNum
+
+   iband_low= Numoccupied- 10000
+   iband_high= Numoccupied+ 10000
+
+   if (iband_low <1) iband_low = 1
+   if (iband_high >ndim_slab) iband_high = ndim_slab
+
+   iband_tot= iband_high- iband_low+ 1
+
+   NumberofEta = 9
+
+   allocate(W(ndim_slab))
+   allocate(Hk(ndim_slab, ndim_slab))
+   allocate(eigval(iband_tot))
+   allocate(eta_array(NumberofEta))
+   allocate(dos(NE, NumberofEta))
+   allocate(dos_mpi(NE, NumberofEta))
+   allocate(omega(NE))
+   dos=0d0
+   dos_mpi=0d0
+   eigval= 0d0
+
+
+   emin= OmegaMin
+   emax= OmegaMax
+   eta_array=(/0.1d0, 0.2d0, 0.4d0, 0.8d0, 1.0d0, 2d0, 4d0, 8d0, 10d0/)
+   eta_array= eta_array*Fermi_broadening
+
+
+   !> energy
+   do ie=1, NE
+      omega(ie)= emin+ (emax-emin)* (ie-1d0)/dble(NE-1)
+   enddo ! ie
+
+   !dk2= kCubeVolume/dble(knv2_slab)
+   dk2= 1d0/dble(knv2_slab)
+
+   !> get eigenvalue
+   time_start= 0d0
+   time_end= 0d0
+   do ik=1+cpuid, knv2_slab, num_cpu
+
+      if (cpuid.eq.0.and. mod(ik/num_cpu, 100).eq.0) &
+         write(stdout, '(a, i18, "/", i18, a, f10.3, "s")') 'ik/knv2_slab', &
+         ik, knv2_slab, ' time left', (knv2_slab-ik)*(time_end-time_start)/num_cpu
+
+      call now(time_start)
+      ikx= (ik-1)/(Nk2)+1
+      iky= ((ik-1-(ikx-1)*Nk2))+1
+      k= K2D_start+ K2D_vec1*(ikx-1)/dble(Nk1)  &
+         + K2D_vec2*(iky-1)/dble(Nk2) 
+
+      !> get the Hamlitonian
+      call ham_slab(k, Hk)
+
+      W= 0d0
+      call eigensystem_c('N', 'U', ndim_slab ,Hk, W)
+      eigval(:)= W(iband_low:iband_high)
+
+      !> get density of state
+      do ie= 1, NE
+         do ib= 1, iband_tot
+            x= omega(ie)- eigval(ib)
+            do ieta= 1, NumberofEta
+               eta0= eta_array(ieta)
+               dos_mpi(ie, ieta) = dos_mpi(ie, ieta)+ delta(eta0, x)
+            enddo
+         enddo ! ib
+      enddo ! ie
+      call now(time_end)
+
+      call now(time_end)
+
+   enddo  ! ik
+
+#if defined (MPI)
+   call mpi_allreduce(dos_mpi,dos,size(dos),&
+      mpi_dp,mpi_sum,mpi_cmw,ierr)
+#else
+   dos= dos_mpi
+#endif
+   dos= dos*dk2
+
+   !> include the spin degeneracy if there is no SOC in the tight binding Hamiltonian.
+   if (SOC<=0) dos=dos*2d0
+
+   outfileindex= outfileindex+ 1
+   if (cpuid.eq.0) then
+      open(unit=outfileindex, file='dos_slab.dat')
+      write(outfileindex, "(a, i10)")'# Density of state of slab system, Nslab= ', Nslab
+      write(outfileindex, '(2a16)')'# E(eV)', 'DOS(E) (1/eV)'
+      write(outfileindex, '("#", a, f6.2, 300f16.2)')'Broadening \eta (meV): ', Eta_array(:)*1000d0/eV2Hartree
+      do ie=1, NE
+         write(outfileindex, '(90f16.6)')omega(ie)/eV2Hartree, dos(ie, :)*eV2Hartree
+      enddo ! ie
+      close(outfileindex)
+   endif
+
+   outfileindex= outfileindex+ 1
+   !> write script for gnuplot
+   if (cpuid==0) then
+      open(unit=outfileindex, file='dos_slab.gnu')
+      write(outfileindex, '(a)')"set encoding iso_8859_1"
+      write(outfileindex, '(a)')'set terminal pdf enhanced color font ",16" size 5,4 '
+      write(outfileindex, '(a)')"set output 'dos_slab.pdf'"
+      write(outfileindex, '(a)')'set border lw 2'
+      write(outfileindex, '(a)')'set autoscale fix'
+      write(outfileindex, '(a, f16.6,a)')'set yrange [0:', maxval(dos)*eV2Hartree+0.5, '1]'
+      write(outfileindex, '(a)')'set key samplen 0.8 spacing 1 font ",12"'
+      write(outfileindex, '(a)')'set xlabel "Energy (eV)"'
+      write(outfileindex, '(a)')'set key title  "Broadening"'
+      write(outfileindex, '(a)')'set title "DOS with different broadenings"'
+      write(outfileindex, '(a)')'set ylabel "DOS (states/eV/unit cell)"'
+      write(outfileindex, '(a, f6.1, a)')"plot 'dos_slab.dat' u 1:2 w l lw 2 title '",&
+         Eta_array(1)*1000/eV2Hartree, "meV', \"
+      do ieta= 2, NumberofEta-1
+         write(outfileindex, 202)" '' u 1:", ieta, " w l lw 2 title '", &
+            Eta_array(ieta)*1000/eV2Hartree, "meV', \"
+      enddo
+      write(outfileindex, '(a, f6.1, a)')" '' u 1:10 w l lw 2 title '",&
+         Eta_array(NumberofEta)*1000/eV2Hartree, "meV'"
+      close(outfileindex)
+   endif
+202 format(a, i3, a, f6.1, a)
+
+#if defined (MPI)
+   call mpi_barrier(mpi_cmw, ierr)
+#endif
+   deallocate(W)
+   deallocate(Hk)
+   deallocate(eigval)
+   deallocate(dos)
+   deallocate(dos_mpi)
+   deallocate(omega)
+
+   return
+end subroutine dos_slab
+
 subroutine joint_dos
 ! calculate joint density of state for 3D bulk system
 !
@@ -543,6 +727,7 @@ subroutine joint_dos
    !> the integration k space
    real(dp) :: emin
    real(dp) :: emax
+   real(dp) :: eta_broadening
 
    integer :: ik, ie, ib, ib1, ib2
    integer :: ikx, iky, ikz, knv3, NE, ierr
@@ -641,7 +826,7 @@ subroutine joint_dos
 
    emin= 0d0
    emax= OmegaMax
-   eta= (emax- emin)/ dble(NE)*3d0
+   eta_broadening= (emax- emin)/ dble(NE)*3d0
 
 
    !> energy
@@ -658,7 +843,7 @@ subroutine joint_dos
          do ib1= 1, iband_tot-1
             do ib2= ib1+1, iband_tot
                x= omega(ie)- eigval(ib2, ik) + eigval(ib1, ik)
-               jdos_mpi(ie) = jdos_mpi(ie)+ delta(eta, x)* (fermi_dis(ib1, ik)- fermi_dis(ib2, ik))
+               jdos_mpi(ie) = jdos_mpi(ie)+ delta(eta_broadening, x)* (fermi_dis(ib1, ik)- fermi_dis(ib2, ik))
             enddo ! ib2
          enddo ! ib1
       enddo ! ik
@@ -712,6 +897,7 @@ subroutine dos_joint_dos
    !> the integration k space
    real(dp) :: emin
    real(dp) :: emax
+   real(dp) :: eta_broadening
 
    integer :: ik, ie, ib, ib1, ib2
    integer :: ikx, iky, ikz, knv3, NE, ierr
@@ -768,7 +954,7 @@ subroutine dos_joint_dos
 
    emin= 0d0
    emax= OmegaMax
-   eta= (emax- emin)/ dble(NE)*5d0
+   eta_broadening= (emax- emin)/ dble(NE)*5d0
 
    !> energy
    do ie=1, NE
@@ -814,7 +1000,7 @@ subroutine dos_joint_dos
          do ib1= iband_low, iband_high-1
             do ib2= ib1+1, iband_high
                x= omega_jdos(ie)- W(ib2) + W(ib1)
-               jdos_mpi(ie)= jdos_mpi(ie)+ delta(eta, x)* (fermi_dis(ib1)- fermi_dis(ib2))
+               jdos_mpi(ie)= jdos_mpi(ie)+ delta(eta_broadening, x)* (fermi_dis(ib1)- fermi_dis(ib2))
             enddo ! ib2
          enddo ! ib1
       enddo ! ie
@@ -824,7 +1010,7 @@ subroutine dos_joint_dos
          !> intergrate with k
          do ib= iband_low, iband_high-1
             x= omega_dos(ie)- W(ib)
-            dos_mpi(ie) = dos_mpi(ie)+ delta(eta, x)
+            dos_mpi(ie) = dos_mpi(ie)+ delta(eta_broadening, x)
          enddo ! ib
       enddo ! ie
 

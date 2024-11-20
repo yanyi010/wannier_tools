@@ -113,6 +113,7 @@ subroutine readinput
    SlabSpintexture_calc  = .FALSE.
    BulkSpintexture_calc  = .FALSE.
    wanniercenter_calc    = .FALSE.
+   Wilsonloop_calc       = .FALSE.
    Z2_3D_calc            = .FALSE.
    Chern_3D_calc         = .FALSE.
    WeylChirality_calc    = .FALSE.
@@ -124,9 +125,11 @@ subroutine readinput
    BerryCurvature_Cube_calc   = .FALSE.
    BerryCurvature_slab_calc = .FALSE.
    Berrycurvature_kpath_EF_calc = .FALSE.
+   BerryCurvature_kpath_sepband_calc = .FALSE.
    BerryCurvature_kpath_Occupied_calc = .FALSE.
    MirrorChern_calc      = .FALSE.
    Dos_calc              = .FALSE.
+   Dos_slab_calc              = .FALSE.
    JDos_calc             = .FALSE.
    EffectiveMass_calc    = .FALSE.
    FindNodes_calc        = .FALSE.
@@ -153,8 +156,12 @@ subroutine readinput
    ANE_calc              = .FALSE.
    w3d_nested_calc =.false.
    valley_projection_calc =.false.
+   Matrix_Element_calc  =.false.
    ChargeDensity_selected_bands_calc= .FALSE.
    ChargeDensity_selected_energies_calc= .FALSE.
+
+   SlabBdG_calc          = .FALSE.
+   BdGChern_calc         = .FALSE.   
 
    read(1001, CONTROL, iostat=stat)
    SlabQPI_kplane_calc= SlabQPI_kplane_calc.or.SlabQPI_calc
@@ -171,14 +178,15 @@ subroutine readinput
       write(*, *)"QPI_unfold_plane_calc, "
       write(*, *)"BulkFatBand_calc, "
       write(*, *)"BulkGap_cube_calc,BulkGap_plane_calc"
-      write(*, *)"SlabBand_calc,SlabBandWaveFunc_calc"
+      write(*, *)"SlabBand_calc,SlabBdG_calc,SlabBandWaveFunc_calc"
       write(*, *)"WireBand_calc,SlabSS_calc,SlabArc_calc "
       write(*, *)"SlabQPI_calc"
       write(*, *)"SlabQPI_kpath_calc"
       write(*, *)"SlabQPI_kplane_calc"
-      write(*, *)"SlabSpintexture,wanniercenter_calc"
+      write(*, *)"SlabSpintexture,wanniercenter_calc, Wilsonloop_calc, "
       write(*, *)"BerryPhase_calc,BerryCurvature_calc, BerryCurvature_EF_calc"
       write(*, *)"Berrycurvature_kpath_EF_calc, BerryCurvature_kpath_Occupied_calc"
+      write(*, *)"BerryCurvature_kpath_sepband_calc"
       write(*, *)"BerryCurvature_slab_calc, BerryCurvature_Cube_calc"
       write(*, *)"Dos_calc, JDos_calc, FindNodes_calc"
       write(*, *)"BulkFS_plane_calc"
@@ -186,6 +194,7 @@ subroutine readinput
       write(*, *)"Z2_3D_calc"
       write(*, *)"Chern_3D_calc"
       write(*, *)"MirrorChern_calc"
+      write(*, *)"BdGChern_calc"
       write(*, *)"WeylChirality_calc"
       write(*, *)"NLChirality_calc"
       write(*, *)"LOTO_correction"
@@ -251,6 +260,7 @@ subroutine readinput
       write(stdout, *) "SlabArc_calc                      : ",  SlabArc_calc
       write(stdout, *) "SlabSpintexture_calc              : ",  SlabSpintexture_calc
       write(stdout, *) "wanniercenter_calc                : ", wanniercenter_calc
+      write(stdout, *) "Wilsonloop_calc                   : ", Wilsonloop_calc  
       write(stdout, *) "BerryPhase_calc                   : ", BerryPhase_calc
       write(stdout, *) "BerryCurvature_calc               : ", BerryCurvature_calc
       write(stdout, *) "BerryCurvature_EF_calc            : ", BerryCurvature_EF_calc
@@ -289,7 +299,11 @@ subroutine readinput
       write(stdout, *) "ChargeDensity_selected_bands_calc : ", ChargeDensity_selected_bands_calc
       write(stdout, *) "ChargeDensity_selected_energies_calc : ", ChargeDensity_selected_energies_calc
       write(stdout, *) "valley_projection_calc : "           , valley_projection_calc
+      write(stdout, *) "SlabBdG_calc        : ",  SlabBdG_calc
+      write(stdout, *) "BdGChern_calc       : ",  BdGChern_calc
    endif
+
+   Wilsonloop_calc= Wilsonloop_calc.or.wanniercenter_calc
 
 !===============================================================================================================!
 !> SYSTEM namelist
@@ -309,7 +323,20 @@ subroutine readinput
    Bx = 0d0
    By = 0d0
    Bz = 0d0
-   
+
+   !>Zeeman field on surface for slab hamiltonian
+   Add_surf_zeeman_field= 1
+   Bx_surf= 0d0
+   By_surf= 0d0
+   Bz_surf= 0d0
+
+   !>Chemical potential mu for BdG
+   mu_BdG = 0d0
+
+   !>s-Wave Superconducting gap
+   Add_Delta_BdG = 3
+   Delta_BdG = 0d0   
+
    Bmagnitude = 0d0
    Btheta = -99999d0
    Bphi = -99999d0
@@ -357,11 +384,12 @@ subroutine readinput
       BerryPhase_calc.or.BerryCurvature_EF_calc.or.BerryCurvature_calc.or.&
       BerryCurvature_plane_selectedbands_calc.or.BerryCurvature_slab_calc.or.&
       MirrorChern_calc.or.WeylChirality_calc.or.NLChirality_calc.or.&
-      FindNodes_calc) then
-         write(*, *)"ERROR: you should set Numoccupied in namelist SYSTEM correctly"
+      FindNodes_calc.or.FermiLevel_calc) then
+         write(*, *)"ERROR: you should set Numoccupied in namelist SYSTEM correctly!!!"
          stop
       else 
          Numoccupied = 1
+         if (cpuid.eq.0)write(stdout, *)"Warning: Numoccupied is set to 1 since you didn't set it!"
       endif
    endif
 
@@ -391,6 +419,7 @@ subroutine readinput
       write(stdout, '(1x, a, 3f16.6)')"Fermi energy (eV) :", E_FERMI
       write(stdout, '(1x, a, 3f16.6)')"surf_onsite (eV): ", surf_onsite
       write(stdout, '(1x, a, L)')"Add_Zeeman_Field: ", Add_Zeeman_Field
+      write(stdout, '(1x, a, i6)')"Add_surf_zeeman_field for slab system: ",Add_surf_zeeman_field
       write(stdout, '(1x, a, 3f16.6)')"Zeeman_energy_in_eV (eV): ",  Zeeman_energy_in_eV
       write(stdout, '(1x, a, 3f16.6)')"Electric_field_in_eVpA (eV/Angstrom): ",  Electric_field_in_eVpA
       write(stdout, '(1x, a, 3f16.6)')"Symmetrical_Electric_field_in_eVpA (eV/Angstrom): ",  Symmetrical_Electric_field_in_eVpA
@@ -410,6 +439,10 @@ subroutine readinput
       write(stdout, "(1x,a)") "If you specify both of them together, we will choose the first one."
       write(stdout, "(1x,a)") "If choose the first one, but not specify Btheta, Bphi, then "
       write(stdout, "(1x,a)") "by default we set Btheta=0, Bphi=0 which means B is along z direction."
+      write(stdout, '(1x, a, 3f16.6)')"Bx_surf, By_surf, Bz_surf :", Bx_surf,By_surf, Bz_surf
+      write(stdout, '(1x, a, 3f16.6)')"Chemical potential mu for BdG (eV):", mu_BdG
+      write(stdout, '(1x, a, i6)')"Add_Delta_BdG for slab system: ", Add_Delta_BdG
+      write(stdout, '(1x, a, 3f16.6)')"s-wave superconducting pairing Delta (eV): ", Delta_BdG
    endif
 
    !> check if Bmagnitude is specified in the input.dat/wt.in
@@ -536,9 +569,10 @@ subroutine readinput
 
 
    !> set up parameters for calculation
-   E_arc = 0.0d0
-   Eta_Arc= 0.001d0
-   EF_broadening= 0.05d0
+   E_arc = -999d0
+   Eta_Arc= -999d0
+   Fermi_broadening= 0.005d0
+   EF_integral_range= 0.05d0
    OmegaNum = 100
    OmegaNum_unfold = 0
    OmegaMin = -1d0
@@ -571,13 +605,21 @@ subroutine readinput
    arpack_solver= 'zndrv1'
    RKF45_PERIODIC_LEVEL= 1
    iprint_level = 1
-
+   nnzmax_input=-1
+   penetration_lambda_arpes= 5 ! in angstrom
+   photon_energy_arpes= 0d0 ! photon energy for ARPES in ev
+   polarization_phi_arpes = (0d0/180d0)*3.14159265358979d0 
+   polarization_xi_arpes= (0d0/180d0)*3.14159265358979d0
+   polarization_alpha_arpes= (45d0/180d0)*3.14159265358979d0
+   polarization_delta_arpes= (0d0/180d0)*3.14159265358979d0
 
    !> by default, we only project on atoms for a given wave function
    projection_weight_mode = "NORMAL"
 
 
+   !>>>> read a lot of parameters from namilist PARAMETERS
    read(1001, PARAMETERS, iostat= stat)
+
    if (Magp<1) Magp= 0
    if (Magp_max<1) Magp_max= Magp
    if (Magq==0) Magq= Nslab
@@ -586,6 +628,7 @@ subroutine readinput
    else
       if (OmegaNum_unfold==0) OmegaNum_unfold= 200
    endif
+
 
    if (stat>0) then
 
@@ -596,19 +639,24 @@ subroutine readinput
 
    endif
 
+   !> try to compatible with old version of WannierTools
+   !> Fermi_broadening and iso_energy are set in PARAMETERS
+   if (Eta_Arc>-998d0) Fermi_broadening= Eta_Arc
+   if (E_Arc>-998d0) iso_energy= E_Arc
+
    NBTau= max(NBTau, BTauNum)
   
    projection_weight_mode= upper(projection_weight_mode)
    if (cpuid==0) then
       write(stdout, *) "  "
       write(stdout, *) ">>>calculation parameters : "
-      write(stdout, '(1x, a, f16.5)')'E_arc : ', E_arc
-      write(stdout, '(1x, a, f16.5)')'Eta_arc : ', Eta_arc
+      write(stdout, '(1x, a, f16.5, a)')'iso_energy : ', iso_energy, ' eV'
+      write(stdout, '(1x, a, f16.5, a)')'Fermi_broadening : ', Fermi_broadening, ' eV'
       write(stdout, '(1x, a, f16.5)')'symprec : ', symprec
-      write(stdout, '(1x, a, f16.5)')'EF_broadening : ', EF_broadening
-      write(stdout, '(1x, a, f16.5)')'Gap_threshold', Gap_threshold
-      write(stdout, '(1x, a, f16.5)')'OmegaMin : ', OmegaMin
-      write(stdout, '(1x, a, f16.5)')'OmegaMax : ', OmegaMax
+      write(stdout, '(1x, a, f16.5, a)')'EF_integral_range : ', EF_integral_range, ' eV'
+      write(stdout, '(1x, a, f16.5, a)')'Gap_threshold', Gap_threshold, ' eV'
+      write(stdout, '(1x, a, f16.5, a)')'OmegaMin : ', OmegaMin, ' eV'
+      write(stdout, '(1x, a, f16.5, a)')'OmegaMax : ', OmegaMax, ' eV'
       write(stdout, '(1x, a, i6   )')'OmegaNum : ', OmegaNum
       write(stdout, '(1x, a, i6   )')'OmegaNum_unfold : ', OmegaNum_unfold
       write(stdout, '(1x, a, i6   )')'Nk1 : ', Nk1
@@ -629,6 +677,7 @@ subroutine readinput
       write(stdout, '(1x, a, f16.2)')'RKF45_PERIODIC_LEVEL', RKF45_PERIODIC_LEVEL
       write(stdout, '(1x, a, i16  )')'Magp_min', Magp_min
       write(stdout, '(1x, a, i16  )')'Magp_max', Magp_max
+      write(stdout, '(1x, a, i16  )')'nnzmax_input', nnzmax_input
       write(stdout, '(1x, a, f16.5)')'wcc_calc_tol', wcc_calc_tol
       write(stdout, '(1x, a, f16.5)')'wcc_neighbour_tol', wcc_neighbour_tol
       write(stdout, '(1x, a, i6   )')'NumLCZVecs', NumLCZVecs
@@ -636,15 +685,22 @@ subroutine readinput
       write(stdout, '(1x, a, i6   )')'NumRandomConfs:', NumRandomConfs
       write(stdout, '(1x, a, a    )')'Projection weight mode:', projection_weight_mode
       write(stdout, '(1x, a, i8   )')'The size of magnetic supercell is Magq= :', Magq
+      write(stdout, '(1x, a, f16.5)')'Penetration depth of incoming photon for ARPES, in unit angstrom :', penetration_lambda_arpes
+      write(stdout, '(1x, a, f16.5)')'Photon energy for ARPES, in unit eV :', photon_energy_arpes
+      write(stdout, '(1x, a, f16.5)')'Incoming light is at alpha angular to the normal line of the experiment plane :', polarization_alpha_arpes
+      write(stdout, '(1x, a, f16.5)')'The ratio between two orthogonal polarization vector components', polarization_xi_arpes 
+      write(stdout, '(1x, a, f16.5)')'The relative phase between two orthogonal polarization vector components', polarization_delta_arpes
    endif
 
    !> changed to atomic units
-   E_arc= E_arc*eV2Hartree
-   Eta_Arc = Eta_Arc*eV2Hartree
+   iso_energy= iso_energy*eV2Hartree
+   Fermi_broadening = Fermi_broadening*eV2Hartree
    OmegaMin= OmegaMin*eV2Hartree
    OmegaMax= OmegaMax*eV2Hartree
    Gap_threshold= Gap_threshold*eV2Hartree
    Rcut= Rcut*Ang2Bohr
+   penetration_lambda_arpes= penetration_lambda_arpes*Ang2Bohr
+   photon_energy_arpes= photon_energy_arpes*eV2Hartree
 
    !> change the unit of relaxtion time from ps to atomic unit
    Relaxation_Time_Tau= Relaxation_Time_Tau*1E-12/Time_atomic
@@ -1082,7 +1138,7 @@ subroutine readinput
       stop
    endif
 
-
+   if (NumLCZVecs> NumberOfspinorbitals) NumLCZVecs= NumberOfspinorbitals
 
 110 continue
 
@@ -1964,11 +2020,11 @@ subroutine readinput
    allocate(k3len(nk3_band))
    allocate(k3len_mag(nk3_band))
    allocate(k3len_unfold(nk3_band))
-   allocate(k3points(3, nk3_band))
+   allocate(kpath_3d(3, nk3_band))
    k3len=0d0
    k3len_mag=0d0
    k3len_unfold=0d0
-   k3points= 0d0
+   kpath_3d= 0d0
    t1= 0d0
    do j=1, nk3lines
       do i=1, NN
@@ -1979,7 +2035,7 @@ subroutine readinput
          !k1= kstart
          !k2= kend
 
-         k3points(:, i+ (j-1)*NN)= kstart+ (kend- kstart)*dble(i-1)/dble(NN-1)
+         kpath_3d(:, i+ (j-1)*NN)= kstart+ (kend- kstart)*dble(i-1)/dble(NN-1)
 
          temp= dsqrt((k2(1)- k1(1))**2 &
             +(k2(2)- k1(2))**2  &
@@ -3534,7 +3590,7 @@ subroutine readinput
    !> close wt.in
    close(1001)
 
-   eta=(omegamax- omegamin)/omeganum*2d0
+   !eta=(omegamax- omegamin)/omeganum*2d0
 
    if(cpuid==0)write(stdout,*)'<<<Read wt.in file successfully'
 
@@ -4792,7 +4848,7 @@ subroutine build_map_supercell_primitivecell
       pos_direct_pc_all(:, ia)= pos_direct_pc
    enddo
 
-   tol = 0.10d0  ! tolrence is tol*(lattice constant)
+   tol = 0.05d0  ! tolrence is tol*(lattice constant)
    !> remove the identity positions
    call eliminate_duplicates_periodic_with_tol(3, NumberofSelectedAtoms(1), pos_direct_sc_all, Nleft, tol)
 
@@ -4811,7 +4867,7 @@ subroutine build_map_supercell_primitivecell
       print *, 'The selected atoms position'
       do i=1, NumberofSelectedAtoms(1)
         !ia= Selected_Atoms(1)%iarray(i)
-         write(*, '(i7, 30f14.6)')ia, pos_cart_sc_all(:, i ), pos_direct_sc_all(:, i )
+         write(*, '(i7, 30f14.6)')i, pos_cart_sc_all(:, i ), pos_direct_sc_all(:, i )
       enddo
       print *, 'The reduced atoms position'
       do ia=1, Nleft
