@@ -271,7 +271,8 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
 
       !> we get the kpath by Btau_final=-exponent_max*BTauMax, but we only use half of them
       !>  means that we can reach the accuracy as to exp(-exponent_max)
-      exponent_max= 30
+      ! exponent_max= 30
+      exponent_max= 15
 
       !> exclude all kpoints with zero velocity x B and large energy away from Fermi level
       do iband= 1, Nband_Fermi_Level 
@@ -543,20 +544,22 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
 
       if (cpuid.eq.0) then
          do ie = 1, OmegaNum
-            write(muname, '(f12.2)')mu_array(ie)/eV2Hartree
+            write(muname, '(f12.1)')mu_array(ie)/eV2Hartree*1000
 
             !> open file for conductivity at mu and write header
-            write(sigmafilename, '(3a)')'sigma_bands_mu_',trim(adjustl(muname)),'eV.dat'
+            write(sigmafilename, '(3a)')'sigma_bands_mu_',trim(adjustl(muname)),'meV.dat'
             open(unit=sigmafileindex(ie), file=sigmafilename)
-            write(sigmafileindex(ie), '(a)')'# Conductivity tensor/tau (in unit of (\Omega*m*s)^-1) for every contributing band' 
+            write(sigmafileindex(ie), '(4a)')'# Conductivity tensor/tau (in unit of (\Omega*m*s)^-1) for every contributing band' , &
+               ', at mu= ', trim(adjustl(muname)), ' meV'
             write(sigmafileindex(ie), '(a,100I5)')'# SELECTEDBANDS  =  ', bands_fermi_level(:)
             write(sigmafileindex(ie), '(a,1000f8.3)')'# Tlist  =  ', KBT_array(:)/8.6173324E-5/eV2Hartree
             write(sigmafileindex(ie), '(a, 1000E16.6)') '# Btaulist  =  ', BTau_array(:)*Magneticfluxdensity_atomic/Relaxation_Time_Tau
 
             !> open file for resistivity at mu and write header
-            write(sigmafilename, '(3a)')'rho_bands_mu_', trim(adjustl(muname)),'eV.dat'
+            write(sigmafilename, '(3a)')'rho_bands_mu_', trim(adjustl(muname)),'meV.dat'
             open(unit=rhofileindex(ie), file=sigmafilename)
-            write(rhofileindex(ie), '(a)')'# Resistivity \tau*\rho (in unit of \Omega*m*s) for every contributing band '
+            write(rhofileindex(ie), '(4a)')'# Resistivity \tau*\rho (in unit of \Omega*m*s) for every contributing band ', &
+               ', at mu= ', trim(adjustl(muname)), ' meV'
             write(rhofileindex(ie), '(a,100I5)')'# SELECTEDBANDS  =  ', bands_fermi_level(:)
             write(rhofileindex(ie), '(a,1000f8.3)')'# Tlist  =  ', KBT_array(:)/8.6173324E-5/eV2Hartree
             write(rhofileindex(ie), '(a, 1000E16.6)') '# Btaulist  =  ', BTau_array(:)*Magneticfluxdensity_atomic/Relaxation_Time_Tau
@@ -718,12 +721,12 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
          !    do ie=1, OmegaNum
          !    outfileindex= outfileindex+ 1
          !    KBT= KBT_array(ikt)/8.6173324E-5/eV2Hartree
-         !    write(tname, '(f12.2)')KBT
-         !    write(muname, '(f12.2)')mu_array(ie)/eV2Hartree
+         !    write(tname, '(f12.1)')KBT
+         !    write(muname, '(f12.1)')mu_array(ie)/eV2Hartree
          !    if (cpuid.eq.0) then
          !       write(bandname, '(i10)')bands_fermi_level(iband)
          !       write(sigmafilename, '(7a)')'sigma_kz_band_', trim(adjustl(bandname)),'_mu_',&
-         !          trim(adjustl(muname)),'eV_T_', trim(adjustl(tname)), 'K.dat'
+         !          trim(adjustl(muname)),'meV_T_', trim(adjustl(tname)), 'K.dat'
          !       open(unit=outfileindex, file=sigmafilename)
          !       write(outfileindex, '(a20, i5, 2(a, f16.4, a))')'# sigma_k at band ', & 
          !          bands_fermi_level(iband), ' temperature at ', KBT, ' K', ' chemical potential at ', mu_array(ie), ' eV'
@@ -768,13 +771,14 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       !> write out the conductivity/tau and resistivity*tau with the same relaxation time for every contributing bands
       if (cpuid.eq.0) then
          do ie=1, OmegaNum
-            write(muname, '(f12.2)')mu_array(ie)/eV2Hartree
+            write(muname, '(f12.1)')mu_array(ie)/eV2Hartree*1000
             
             !> write out the total conductivity with the same relaxation time for all bands
             outfileindex= outfileindex+ 1
-            write(sigmafilename, '(3a)')'sigma_total_mu_',trim(adjustl(muname)),'eV.dat'
+            write(sigmafilename, '(3a)')'sigma_total_mu_',trim(adjustl(muname)),'meV.dat'
             open(unit=outfileindex, file=sigmafilename)
-            write(outfileindex, '(a)')'# \sigma/\tau with unit (Ohm*m*s)^-1 is the summation of all bands \sum_n\sigma_n/\tau_n ' 
+            write(outfileindex, '(4a)')'# \sigma/\tau with unit (Ohm*m*s)^-1 is the summation of all bands \sum_n\sigma_n/\tau_n ', &
+               ', at mu= ', trim(adjustl(muname)), ' meV'
             write(outfileindex, '(a)')'# relaxation time \tau_n=\tau is the same for all bands. '
             write(outfileindex, '(a,2I6)')'# NumT  NumBtau  =  ', NumT, NBTau 
             write(outfileindex, '(a,1000f8.3)')'# Tlist  =  ', KBT_array(:)/8.6173324E-5/eV2Hartree
@@ -800,9 +804,10 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
 
             !> write out the total resistivity with the same relaxation time for all bands
             outfileindex= outfileindex+ 1
-            write(sigmafilename, '(3a)')'rho_total_mu_',trim(adjustl(muname)),'eV.dat'
+            write(sigmafilename, '(3a)')'rho_total_mu_',trim(adjustl(muname)),'meV.dat'
             open(unit=outfileindex, file=sigmafilename)
-            write(outfileindex, '(a)')'# \tau*\rho with unit (Ohm*m*s) is the inverse of Conductivity tensor \sum_n\sigma_n/\tau ' 
+            write(outfileindex, '(4a)')'# \tau*\rho with unit (Ohm*m*s) is the inverse of Conductivity tensor \sum_n\sigma_n/\tau ', &
+               ', at mu= ', trim(adjustl(muname)), ' meV'
             write(outfileindex, '(a)')'# relaxation time \tau_n=\tau is the same for all bands. '
             write(outfileindex, '(a,2I6)')'# NumT  NumBtau  =  ', NumT, NBTau 
             write(outfileindex, '(a,1000f8.3)')'# Tlist  =  ', KBT_array(:)/8.6173324E-5/eV2Hartree
@@ -964,13 +969,17 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                      BTau= BTau_array(ibtau)
 
                      if (NBTau==1)then
-                        NSlice_Btau_local= 2
+                        ! NSlice_Btau_local= 2
+                        NSlice_Btau_local= 1
                      else
-                        NSlice_Btau_local= (ibtau-1)*NSlice_Btau_inuse/(NBTau-1)/2
+                        ! NSlice_Btau_local= (ibtau-1)*NSlice_Btau_inuse/(NBTau-1)/2
+                        NSlice_Btau_local= (ibtau-1)*NSlice_Btau_inuse/(NBTau-1)
                         if (NSlice_Btau_local==0)then
-                           NSlice_Btau_local= 2
+                           ! NSlice_Btau_local= 2
+                           NSlice_Btau_local= 1
                         else
-                           DeltaBtau= exponent_max/2d0/NSlice_Btau_local
+                           ! DeltaBtau= exponent_max/2d0/NSlice_Btau_local
+                           DeltaBtau= exponent_max/NSlice_Btau_local
                         endif
                      endif
    
@@ -980,21 +989,41 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                         !> The core of Chamber formular is to get the average of velocity 
                         !> in the relaxation time approximation
                         v_k= klist_iband(iband)%velocity_k(:, 1+ishift)
-                        if (BTau>eps3.and.NSlice_Btau_local>2) then
-                           ! set weight 
-                           do it=1, NSlice_Btau_local
-                              weights(it) = exp(-DeltaBtau*(it-1d0))
-                           enddo
-                           !> trapezoidal integral
+                        ! if (BTau>eps3.and.NSlice_Btau_local>2) then
+                        if (BTau>eps3.and.NSlice_Btau_local>1) then
                            velocity_bar_k= 0d0
-                           do it=1, NSlice_Btau_local
+                           !> five point integration(n=4)
+                           do it=1, NSlice_Btau_local, 4 !(hj, j=it-1, j mod 4==0, Aj=28/45)
                              velocity_bar_k= velocity_bar_k+ &
-                                DeltaBtau*exp(-(it-1d0)*DeltaBtau)*klist_iband(iband)%velocity_k(:, it+ishift)
+                                 28.0d0/45.0d0*DeltaBtau*exp(-(it-1d0)*DeltaBtau)*klist_iband(iband)%velocity_k(:, it+ishift)
                            enddo
-                           velocity_bar_k= velocity_bar_k &
-                           - 0.5d0*DeltaBtau*(exp(-(NSlice_Btau_local-1d0)*DeltaBtau)&
-                           * klist_iband(iband)%velocity_k(:, NSlice_Btau_local+ishift)  &
-                           + klist_iband(iband)%velocity_k(:, 1+ishift))
+                           do it=2, NSlice_Btau_local, 4 !(hj, j=it-1, j mod 4==1, Aj=64/45)
+                              velocity_bar_k= velocity_bar_k+ &
+                                 64.0d0/45.0d0*DeltaBtau*exp(-(it-1d0)*DeltaBtau)*klist_iband(iband)%velocity_k(:, it+ishift)
+                           enddo
+                           do it=3, NSlice_Btau_local, 4 !(hj, j=it-1, j mod 4==2, Aj=24/45)
+                              velocity_bar_k= velocity_bar_k+ &
+                                 24.0d0/45.0d0*DeltaBtau*exp(-(it-1d0)*DeltaBtau)*klist_iband(iband)%velocity_k(:, it+ishift)
+                           enddo
+                           do it=4, NSlice_Btau_local, 4 !(hj, j=it-1, j mod 4==3, Aj=64/45)
+                              velocity_bar_k= velocity_bar_k+ &
+                                 64.0d0/45.0d0*DeltaBtau*exp(-(it-1d0)*DeltaBtau)*klist_iband(iband)%velocity_k(:, it+ishift)
+                           enddo
+                           velocity_bar_k= velocity_bar_k-14.0d0/45.0d0*DeltaBtau*klist_iband(iband)%velocity_k(:, 1+ishift)
+                           ! set weight 
+                           ! do it=1, NSlice_Btau_local
+                           !    weights(it) = exp(-DeltaBtau*(it-1d0))
+                           ! enddo
+                           ! !> trapezoidal integral
+                           ! velocity_bar_k= 0d0
+                           ! do it=1, NSlice_Btau_local
+                           !   velocity_bar_k= velocity_bar_k+ &
+                           !      DeltaBtau*exp(-(it-1d0)*DeltaBtau)*klist_iband(iband)%velocity_k(:, it+ishift)
+                           ! enddo
+                           ! velocity_bar_k= velocity_bar_k &
+                           ! - 0.5d0*DeltaBtau*(exp(-(NSlice_Btau_local-1d0)*DeltaBtau)&
+                           ! * klist_iband(iband)%velocity_k(:, NSlice_Btau_local+ishift)  &
+                           ! + klist_iband(iband)%velocity_k(:, 1+ishift))
 
                           !> Simpson's integral
                           !> add the first and the last term
