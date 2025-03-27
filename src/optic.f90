@@ -401,8 +401,14 @@ subroutine bulk_photovoltaic
         ! call dHdkdk_latticegauge_wann(k, dHdkdk)
         ! !> eq(29c)
         ! call dHdkdk_latticegauge_Ham(UU, dHdkdk, Wmn_Ham)
-        call d2Hdk2_atomicgauge_wann(k, dHdkdk)
-        call d2Hdk2_atomicgauge_Ham(UU, dHdkdk, Wmn_ham)
+
+        !ATTENTION!!!!!!! keep wann, no wann is a test!!!
+        !call d2Hdk2_atomicgauge_wann(k, dHdkdk) 
+        call d2Hdk2_atomicgauge(k, dHdkdk)
+
+        !ATTENTION!!!!!!! keep Ham, no wann is a test!!!
+        !call d2Hdk2_atomicgauge_Ham(UU, dHdkdk, Wmn_ham)
+        call d2Hdk2_atomicgauge(UU, dHdkdk, Wmn_ham)
 
         call generalderivative(W, V_Ham, D_Ham, Wmn_Ham, gen_der_r)
 

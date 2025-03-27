@@ -674,7 +674,13 @@
      !> only used for generating the POSCAR_slab
      real(dp) :: Vacuum_thickness_in_Angstrom
 
-     !> system parameters namelist
+
+    !> For optic.f90
+    integer :: FreqNum
+    double precision :: FreqMin, FreqMax, eta_smr_fixed
+    !> namelist parameters
+    namelist /PARAMETERS/ FreqNum, FreqMin, FreqMax, eta_smr_fixed
+     
      !> Some parameters that relate to the properties of the bulk hamiltonian
      namelist / SYSTEM / Soc, E_fermi, Bx, By, Bz, Btheta, Bphi, surf_onsite, &
         Nslab, Nslab1, Nslab2, Numoccupied, Ntotch, Bmagnitude, &
