@@ -1,5 +1,5 @@
-OBJ =  module.o sparse.o wt_aux.o math_lib.o symmetry.o \
-		 readHmnR.o inverse.o proteus.o \
+OBJ =  module.o sparse.o wt_aux.o math_lib.o mgmres.o symmetry.o \
+		  readHmnR.o inverse.o proteus.o \
        eigen.o ham_qlayer2qlayer.o psi.o unfolding.o rand.o \
   		 ham_slab.o ham_bulk.o ek_slab.o ek_bulk_polar.o ek_bulk.o \
        readinput.o fermisurface.o surfgreen.o surfstat.o \
@@ -11,12 +11,10 @@ OBJ =  module.o sparse.o wt_aux.o math_lib.o symmetry.o \
   		 effective_mass.o findnodes.o \
 		 sigma_OHE.o sigma.o Boltz_transport_anomalous.o \
 		 2D_TSC.o \
-		main.o
+	main.o
 
 # compiler
-F90  = mpif90 -fpp -DMPI -fpe3 -O3 -DARPACK -DINTELMKL #-check all -traceback -g
-#F90  = ifort -fpp  -DINTELMKL -fpe3 -check all -traceback -g
-CC = mpicc -cpp -O3 -DINTELMKL 
+F90  = mpiifort -fpp -DMPI -DINTELMKL -fpe3
 
 INCLUDE = -I${MKLROOT}/include
 WFLAG = -nogen-interface
@@ -25,7 +23,7 @@ FFLAG = $(OFLAG) $(WFLAG)
 LFLAG = $(OFLAG)
 
 # ARPACK LIBRARY
-ARPACK=/Users/user/quan/work/workplace/ARPACK/libarpack_MAC.a
+ARPACK=/data/home/yanyi2024/0-tools/0-Basic/ARPACK/libarpack_MAC.a
 
 # blas and lapack libraries
 # static linking
@@ -35,17 +33,17 @@ ARPACK=/Users/user/quan/work/workplace/ARPACK/libarpack_MAC.a
 		  ${ARPACK}
 
 # dynamic linking
-LIBS = ${ARPACK} -L/${MKLROOT}/lib/intel64 -lmkl_core -lmkl_sequential -lmkl_intel_lp64 -lpthread 
+LIBS = ${ARPACK} -L/${MKLROOT}/lib/intel64 -lmkl_core -lmkl_sequential -lmkl_intel_lp64 -lpthread
  
 main : $(OBJ)
-	$(F90) $(LFLAG) $(OBJ) -o wt.x $(LIBS)
-	cp -f wt.x ../bin
+	$(F90) $(LFLAG) $(OBJ) -o wt-dev.x $(LIBS)
+	cp -f wt-dev.x ../bin
 
-.SUFFIXES: .o .f90 .c
+.SUFFIXES: .o .f90
 
 .f90.o :
 	$(F90) $(FFLAG) $(INCLUDE) -c $*.f90
 
 clean :
-	rm -f *.o *.mod *~ wt.x
+	rm -f *.o *.mod *~ wt-dev.x
 
