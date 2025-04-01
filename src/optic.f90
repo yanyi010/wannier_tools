@@ -402,9 +402,8 @@ subroutine bulk_photovoltaic
         ! !> eq(29c)
         ! call dHdkdk_latticegauge_Ham(UU, dHdkdk, Wmn_Ham)
 
-        !YANYI ATTENTION!!!!!!! keep wann, no wann is a test!!!
-        !call d2Hdk2_atomicgauge_wann(k, dHdkdk) 
-        call d2Hdk2_atomicgauge(k, dHdkdk)
+        call d2Hdk2_atomicgauge_wann(k, dHdkdk) 
+        !call d2Hdk2_atomicgauge(k, dHdkdk)
 
         !YANYI ATTENTION!!!!!!! keep Ham, no Ham is a test!!!
         !call d2Hdk2_atomicgauge_Ham(UU, dHdkdk, Wmn_ham)
