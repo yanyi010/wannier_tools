@@ -8,7 +8,7 @@ subroutine linear_optic
    !>                                                                 !
    !>                                                                 !
    !> Use TBA approximation                                           !
-   !>                                                                 !
+   !> Ref. : PHYSICAL REVIEW B 97, 245143 (2018)                      !
    !------------------------------------------------------------------!
     
     integer :: ik, ikx, iky, ikz, knv3, ifreq, i, j, m, n, index, ierr
@@ -402,11 +402,11 @@ subroutine bulk_photovoltaic
         ! !> eq(29c)
         ! call dHdkdk_latticegauge_Ham(UU, dHdkdk, Wmn_Ham)
 
-        !ATTENTION!!!!!!! keep wann, no wann is a test!!!
+        !YANYI ATTENTION!!!!!!! keep wann, no wann is a test!!!
         !call d2Hdk2_atomicgauge_wann(k, dHdkdk) 
         call d2Hdk2_atomicgauge(k, dHdkdk)
 
-        !ATTENTION!!!!!!! keep Ham, no wann is a test!!!
+        !YANYI ATTENTION!!!!!!! keep Ham, no Ham is a test!!!
         !call d2Hdk2_atomicgauge_Ham(UU, dHdkdk, Wmn_ham)
         call d2Hdk2_atomicgauge(UU, dHdkdk, Wmn_ham)
 
