@@ -8,7 +8,7 @@ subroutine linear_optic
    !>                                                                 !
    !>                                                                 !
    !> Use TBA approximation                                           !
-   !> Reference : PHYSICAL REVIEW B 97, 245143 (2018)                 !
+   !>                                                                 !
    !------------------------------------------------------------------!
     
     integer :: ik, ikx, iky, ikz, knv3, ifreq, i, j, m, n, index, ierr
@@ -401,8 +401,7 @@ subroutine bulk_photovoltaic
         ! call dHdkdk_latticegauge_wann(k, dHdkdk)
         ! !> eq(29c)
         ! call dHdkdk_latticegauge_Ham(UU, dHdkdk, Wmn_Ham)
-
-        call d2Hdk2_atomicgauge_wann(k, dHdkdk) 
+        call d2Hdk2_atomicgauge_wann(k, dHdkdk)
         call d2Hdk2_atomicgauge_Ham(UU, dHdkdk, Wmn_ham)
 
         call generalderivative(W, V_Ham, D_Ham, Wmn_Ham, gen_der_r)

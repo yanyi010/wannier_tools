@@ -260,6 +260,40 @@ subroutine d2Hdk2_atomicgauge_wann(k, D2HDk2_wann)
 end subroutine d2Hdk2_atomicgauge_wann
 
 
+
+subroutine d2Hdk2_atomicgauge_Ham(UU, dHdkdk, Wmn_Ham, k, D2HDk2_wann)
+   !> second derivative of H(k)
+   use para, only : Nrpts, irvec, crvec, Origin_cell, HmnR, ndegen, &
+       Num_wann, dp, Rcut, pi2zi, zi, twopi, pi
+   implicit none
+
+   !> Inputs
+   complex(dp), intent(in)  :: UU(Num_wann, Num_wann)
+   complex(dp), intent(in)  :: dHdkdk(Num_wann, Num_wann, 3, 3)
+   complex(dp), intent(in)  :: Wmn_Ham(Num_wann, Num_wann)
+   real(dp),    intent(in)  :: k(3)
+
+   !> Output
+   complex(dp), intent(out) :: D2HDk2_wann(Num_wann, Num_wann, 3, 3)
+
+   !> Local variables
+   integer :: iR, i1, i2, i, j
+   real(dp) :: pos(3), pos1(3), pos2(3), pos_cart(3), pos_direct(3)
+   real(dp) :: kdotr, dis
+   complex(dp) :: ratio
+   real(dp), external :: norm
+
+   !> Initialize output
+   D2HDk2_wann = (0.0_dp, 0.0_dp)
+
+   !> (Dummy computation or placeholder here)
+
+   return
+end subroutine d2Hdk2_atomicgauge_Ham
+
+
+
+
 subroutine dHdk_atomicgauge(k, velocity_Wannier)
    !> Velocity operator in Wannier basis using atomic gauge
    !> First derivate of H(k); dH(k)/dk
