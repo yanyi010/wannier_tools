@@ -261,32 +261,28 @@ end subroutine d2Hdk2_atomicgauge_wann
 
 
 
-subroutine d2Hdk2_atomicgauge_Ham(UU, dHdkdk, Wmn_Ham, k, D2HDk2_wann)
-   !> second derivative of H(k)
-   use para, only : Nrpts, irvec, crvec, Origin_cell, HmnR, ndegen, &
-       Num_wann, dp, Rcut, pi2zi, zi, twopi, pi
+subroutine d2Hdk2_atomicgauge_Ham(UU, dHdkdk, D2HDk2_Ham)
+   !> Transform d2H/dk^2 from Wannier gauge to Hamiltonian gauge
+   use para, only : Num_wann, dp
    implicit none
 
-   !> Inputs
+   ! Inputs
    complex(dp), intent(in)  :: UU(Num_wann, Num_wann)
    complex(dp), intent(in)  :: dHdkdk(Num_wann, Num_wann, 3, 3)
-   complex(dp), intent(in)  :: Wmn_Ham(Num_wann, Num_wann)
-   real(dp),    intent(in)  :: k(3)
 
-   !> Output
-   complex(dp), intent(out) :: D2HDk2_wann(Num_wann, Num_wann, 3, 3)
+   ! Output
+   complex(dp), intent(out) :: D2HDk2_Ham(Num_wann, Num_wann, 3, 3)
 
-   !> Local variables
-   integer :: iR, i1, i2, i, j
-   real(dp) :: pos(3), pos1(3), pos2(3), pos_cart(3), pos_direct(3)
-   real(dp) :: kdotr, dis
-   complex(dp) :: ratio
-   real(dp), external :: norm
+   ! Locals
+   integer :: i, j
+   complex(dp) :: mat_tmp(Num_wann, Num_wann)
 
-   !> Initialize output
-   D2HDk2_wann = (0.0_dp, 0.0_dp)
-
-   !> (Dummy computation or placeholder here)
+   do i = 1, 3
+      do j = 1, 3
+         call rotation_to_Ham_basis(UU, dHdkdk(:, :, i, j), mat_tmp)
+         D2HDk2_Ham(:, :, i, j) = mat_tmp
+      enddo
+   enddo
 
    return
 end subroutine d2Hdk2_atomicgauge_Ham
