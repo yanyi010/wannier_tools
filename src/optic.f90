@@ -9,7 +9,6 @@ subroutine linear_optic
    !>                                                                 !
    !> Use TBA approximation                                           !
    !> Reference : PHYSICAL REVIEW B 97, 245143 (2018)                 !
-   !>             Quantum Front 2, 6 (2023)                           !
    !------------------------------------------------------------------!
     
     integer :: ik, ikx, iky, ikz, knv3, ifreq, i, j, m, n, index, ierr
@@ -246,6 +245,8 @@ subroutine bulk_photovoltaic
    !>                                                                 !
    !> Use TBA approximation                                           !
    !>                                                                 !
+   !> Reference : PHYSICAL REVIEW B 97, 245143 (2018)                 !
+   !>             Quantum Front 2, 6 (2023)                           !
    !------------------------------------------------------------------!
 
     integer :: ik, ikx, iky, ikz, knv3, ifreq, i, j, a, b, c, m, n, index, ierr

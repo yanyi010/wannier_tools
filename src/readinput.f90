@@ -163,6 +163,9 @@ subroutine readinput
    SlabBdG_calc          = .FALSE.
    BdGChern_calc         = .FALSE.   
 
+   linear_optic_calc = .FALSE.
+   BPVE_calc = .FALSE.
+
    read(1001, CONTROL, iostat=stat)
    SlabQPI_kplane_calc= SlabQPI_kplane_calc.or.SlabQPI_calc
 
