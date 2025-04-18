@@ -446,6 +446,8 @@
      logical :: Translate_to_WS_calc  ! whether translate the k points into the Wigner-Seitz cell
      logical :: FermiLevel_calc  ! calculate Fermi level for a given temperature Beta=1/T
      logical :: ANE_calc ! calculate  anomalous nernst coefficient
+     logical :: linear_optic_calc  ! Linear optical conductivity @ optic.f90
+     logical :: BPVE_calc  !  bulk photovotaic conducticity @ optic.f90
      
      logical :: LanczosBand_calc=.false.
      logical :: LanczosDos_calc= .false.
@@ -456,10 +458,6 @@
      
      logical :: w3d_nested_calc = .false.
      logical :: Matrix_Element_calc = .false. ! Matrix element calculation
-
-
-     logical :: linear_optic_calc = .false. ! Linear optical conductivity @ optic.f90
-     logical :: BPVE_calc = .false. !  bulk photovotaic conducticity @ optic.f90
 
      namelist / Control / BulkBand_calc, BulkFS_calc,  BulkFS_Plane_calc, &
                           BulkFS_plane_stack_calc,  BulkGap_plane_calc, &

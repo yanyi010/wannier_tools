@@ -33,7 +33,7 @@ subroutine readinput
       if(cpuid==0)write(stdout,*) '>>>Read some paramters from wt.in'
       open(unit=1001,file=fname,status='old')
    else
-      if(cpuid==0)write(stdout,*)'file' ,fname, 'dosnot exist'
+      if(cpuid==0)write(stdout,*)'file' ,fname, 'does not exist'
       stop
    endif
 
@@ -223,6 +223,8 @@ subroutine readinput
       write(*, *)"valley_projection_calc"
       write(*, *)"ChargeDensity_selected_energies_calc"
       write(*, *)"ChargeDensity_selected_bands_calc"
+      write(*, *)"linear_optic_calc"
+      write(*, *)"BPVE_calc"
       write(*, *)"The default Vaule is F"
 
       backspace(1001)
@@ -304,6 +306,8 @@ subroutine readinput
       write(stdout, *) "valley_projection_calc : "           , valley_projection_calc
       write(stdout, *) "SlabBdG_calc        : ",  SlabBdG_calc
       write(stdout, *) "BdGChern_calc       : ",  BdGChern_calc
+      write(stdout, *) "linear_optic_calc       : ",  linear_optic_calc
+      write(stdout, *) "BPVE_calc      : ",  BPVE_calc
    endif
 
    Wilsonloop_calc= Wilsonloop_calc.or.wanniercenter_calc

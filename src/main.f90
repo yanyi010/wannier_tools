@@ -763,7 +763,7 @@
    endif
 
 
-     !> calculate the linear optical conductivity 
+     !> calculate the the bulk photovotaic effect 
      if (BPVE_calc)then
       if(cpuid.eq.0)write(stdout, *)' '
       if(cpuid.eq.0)write(stdout, *)'>> Start of calculating the bulk photovotaic effect'
