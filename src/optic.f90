@@ -129,6 +129,7 @@ subroutine linear_optic
         UU=Hamk_bulk
         call eigensystem_c( 'V', 'U', Num_wann, UU, W)
 
+        ! Since the Fermi Level has already been extracted in readHmnR.f90, we just need to compare W(i) with 0eV
         occ = 0.0_dp
         do i = 1, Num_wann
             if (W(i) < 0.0_dp) occ(i) = 1.0_dp
@@ -511,7 +512,7 @@ subroutine bulk_photovoltaic
 
         outfileindex= outfileindex+ 1
         open(unit=outfileindex, file='linear_inject.dat')
-        write(outfileindex, '("#",10a)')' the circular shift conductivity'
+        write(outfileindex, '("#",10a)')' the circular inject conductivity'
         write(outfileindex, "('#column', i5, 3000i16)")(i, i=1, 19)
         write(outfileindex, '("#",a13, 20a16)')'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
                                                 'yxx', 'yxy', 'yxz', 'yyy', 'yyz', 'yzz', 'zxx', 'zxy', 'zxz', &

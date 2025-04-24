@@ -584,6 +584,10 @@ subroutine readinput
    OmegaNum_unfold = 0
    OmegaMin = -1d0
    OmegaMax =  1d0
+   FreqMin = 0d0
+   FreqMax = 2d0
+   FreqNum = 101
+   eta_smr_fixed = 0.001d0
    Nk1 = 10
    Nk2 = 10
    Nk3 = 1 
@@ -665,6 +669,10 @@ subroutine readinput
       write(stdout, '(1x, a, f16.5, a)')'OmegaMin : ', OmegaMin, ' eV'
       write(stdout, '(1x, a, f16.5, a)')'OmegaMax : ', OmegaMax, ' eV'
       write(stdout, '(1x, a, i6   )')'OmegaNum : ', OmegaNum
+      write(stdout, '(1x, a, f16.5, a)')'FreqMin : ', FreqMin, ' eV'
+      write(stdout, '(1x, a, f16.5, a)')'FreqMax : ', FreqMax, ' eV'
+      write(stdout, '(1x, a, i6   )')'FreqNum : ', FreqNum
+      write(stdout, '(1x, a, f16.5, a)')'eta_smr_fixed : ', eta_smr_fixed, ' eV'
       write(stdout, '(1x, a, i6   )')'OmegaNum_unfold : ', OmegaNum_unfold
       write(stdout, '(1x, a, i6   )')'Nk1 : ', Nk1
       write(stdout, '(1x, a, i6   )')'Nk2 : ', Nk2
@@ -708,6 +716,9 @@ subroutine readinput
    Rcut= Rcut*Ang2Bohr
    penetration_lambda_arpes= penetration_lambda_arpes*Ang2Bohr
    photon_energy_arpes= photon_energy_arpes*eV2Hartree
+
+   FreqMin = FreqMin * eV2Hartree ! for optic.f90
+   FreqMax = FreqMax * eV2Hartree ! for optic.f90
 
    !> change the unit of relaxtion time from ps to atomic unit
    Relaxation_Time_Tau= Relaxation_Time_Tau*1E-12/Time_atomic

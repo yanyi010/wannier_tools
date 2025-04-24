@@ -623,9 +623,15 @@
      real(dp) :: polarization_xi_arpes ! defines the ratio between two orthogonal polarization vector components
      real(dp) :: polarization_delta_arpes ! the relative phase between two orthogonal polarization vector components
 
+
+     !> For optic.f90
+     integer :: FreqNum
+     real(dp) :: FreqMin, FreqMax, eta_smr_fixed
+
      !> namelist parameters
      namelist /PARAMETERS/ E_arc, Fermi_broadening, EF_integral_range, OmegaNum, OmegaNum_unfold, OmegaMin, OmegaMax, &
-        Eta_Arc, iso_energy, Nk1, Nk2, Nk3, NP, Gap_threshold, Tmin, Tmax, NumT, &
+        Eta_Arc, iso_energy, Nk1, Nk2, Nk3, FreqNum, FreqMin, FreqMax, eta_smr_fixed, &
+        NP, Gap_threshold, Tmin, Tmax, NumT, &
         NBTau, BTauNum, BTauMax, Rcut, Magp, Magq, Magp_min, Magp_max, Nslice_BTau_Max, &
         wcc_neighbour_tol, wcc_calc_tol, Beta,NumLCZVecs, iprint_level, &
         Relaxation_Time_Tau,  symprec, arpack_solver, RKF45_PERIODIC_LEVEL, &
@@ -677,13 +683,6 @@
      !> a parameter to control the Vacumm thickness for the slab system 
      !> only used for generating the POSCAR_slab
      real(dp) :: Vacuum_thickness_in_Angstrom
-
-
-    !> For optic.f90
-    integer :: FreqNum
-    double precision :: FreqMin, FreqMax, eta_smr_fixed
-    !> namelist parameters
-    namelist /PARAMETERS/ FreqNum, FreqMin, FreqMax, eta_smr_fixed
      
      !> Some parameters that relate to the properties of the bulk hamiltonian
      namelist / SYSTEM / Soc, E_fermi, Bx, By, Bz, Btheta, Bphi, surf_onsite, &
