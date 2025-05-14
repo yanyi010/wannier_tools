@@ -277,12 +277,12 @@ subroutine d2Hdk2_atomicgauge_Ham(UU, dHdkdk, D2HDk2_Ham)
    integer :: i, j
    complex(dp) :: mat_tmp(Num_wann, Num_wann)
 
-   do i = 1, 3
-      do j = 1, 3
+   do j = 1, 3
+      do i = 1, 3
          call rotation_to_Ham_basis(UU, dHdkdk(:, :, i, j), mat_tmp)
          D2HDk2_Ham(:, :, i, j) = mat_tmp
-      enddo
-   enddo
+      enddo ! i
+   enddo ! j
 
    return
 end subroutine d2Hdk2_atomicgauge_Ham

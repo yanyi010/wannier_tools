@@ -99,11 +99,6 @@
         write(stdout, '(a)') "                           Author : QuanSheng Wu                        "
         write(stdout, '(a)') "                        Email : wuquansheng@gmail.com                   "
         write(stdout, '(a)') "               Find more information on www.wanniertools.com            "
-        write(stdout, '(a)') "                                                                        "
-        write(stdout, '(a)') "                                                                        "
-        write(stdout, '(a)') "                                                                        "
-        write(stdout, '(a)') "                                  YANYI                                 "
-        write(stdout, '(a)') "               SPECIAL VERSION FOR DEVELOPING OPITC CALCULATIONS        "
         write(stdout, '(a)') " ======================================================================="
         write(stdout, '(a)') "                                                                        "
      endif
