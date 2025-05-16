@@ -719,6 +719,7 @@ subroutine readinput
 
    FreqMin = FreqMin * eV2Hartree ! for optic.f90
    FreqMax = FreqMax * eV2Hartree ! for optic.f90
+   eta_smr_fixed = eta_smr_fixed * eV2Hartree ! for optic.f90
 
    !> change the unit of relaxtion time from ps to atomic unit
    Relaxation_Time_Tau= Relaxation_Time_Tau*1E-12/Time_atomic
