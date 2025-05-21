@@ -426,10 +426,6 @@ subroutine bulk_photovoltaic
                                                         + (occ(m)-occ(n))*aimag((gen_der_r(m, n, c, a)*AA(n, m, b) &
                                                         + AA(n, m, c)*gen_der_r(m, n, b, a))*(delta(eta_smr_fixed, xminus) &
                                                         + delta(eta_smr_fixed, xplus)))
-                            ! lshiftcur_mpi(a, i, ifreq) = lshiftcur_mpi(a, i, ifreq) &
-                            !                             + (occ(m)-occ(n))*aimag((gen_der_r(m, n, c, a) &
-                            !                             + gen_der_r(m, n, b, a))*(delta(eta_smr_fixed, xminus) &
-                            !                             + delta(eta_smr_fixed, xplus)))
                             cshiftcur_mpi(a, i, ifreq) = cshiftcur_mpi(a, i, ifreq) &
                                                         + (occ(m)-occ(n))*real((gen_der_r(m, n, c, a)*AA(n, m, b) &
                                                         - AA(n, m, c)*gen_der_r(m, n, b, a))*(delta(eta_smr_fixed, xminus) &
@@ -464,12 +460,51 @@ subroutine bulk_photovoltaic
    ! ------------------------------------------------------------------------
    ! At this point 
    ! 
-   ! lshiftcur = 
+   ! lshiftcur = Image( N * V_c * int [dk /(2pi)^3] (sum_{m,n}) 
+   !                   *  (f_m - f_n)
+   !                   * [ (r^{c}_{mn})_{k^{a}} * r^{b}_{mn} + (r^{c}_{nm})_{k^{a}} * r^{b}_{mn} ]
+   !                   * [ delta( omega_{mn}) - omega ) + delta( omega_{mn}) + omega ) ] )
+   !
+   ! cshiftcur =  Real( N * V_c * int [dk /(2pi)^3] (sum_{m,n}) 
+   !                   *  (f_m - f_n)
+   !                   * [ (r^{c}_{mn})_{k^{a}} * r^{b}_{mn} - (r^{c}_{nm})_{k^{a}} * r^{b}_{mn} ]
+   !                   * [ delta( omega_{mn}) - omega ) + delta( omega_{mn}) + omega ) ] )
+   !
+   ! linjectcur = Real( N * V_c * int [dk /(2pi)^3] (sum_{m,n}) 
+   !                   *  (f_m - f_n)
+   !                   * [ V_ham(m, m, a) - V_ham(n, n, a) ]
+   !                   * [ (r^{c}_{mn})_{k^{a}} * r^{b}_{mn} + (r^{c}_{nm})_{k^{a}} * r^{b}_{mn} ]
+   !                   * [ delta( omega_{mn}) - omega ) ] )
+   !
+   ! cinjectcur = Image( N * V_c * int [dk /(2pi)^3] (sum_{m,n})
+   !                    *  (f_m - f_n)
+   !                    * [ V_ham(m, m, a) - V_ham(n, n, a) ]
+   !                    * [ (r^{c}_{mn})_{k^{a}} * r^{b}_{mn} - (r^{c}_{nm})_{k^{a}} * r^{b}_{mn} ]
+   !                    * [ delta( omega_{mn}) - omega ) ] )
+   !
+   ! (N is the number of kpoints, V_c is the cell volume). We want :
+   !
+   ! LS = [ (e^3 * pi) / (2 * hbar^2) ] * lshiftcur / N * V_c
+   ! CS = [ (e^3 * pi) / (2 * hbar^2) ] * cshiftcur / N * V_c
+   ! LI = [ (e^3 * pi) / (hbar^2) ] * linjectcur / N * V_c
+   ! CI = [ (e^3 * pi) / (hbar^2) ] * cinjectcur / N * V_c
    !
    ! --------------------------------------------------------------------
       
-    !> in the latest version, we use the atomic unit
-    
+    !> The calculation inside WannierTools uses atomic unit, the output uses SI unit.
+
+    lshiftcur = lshiftcur/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume&
+                   *pi*Echarge**3/2/hbar**2/Bohr_radius/100
+
+    cshiftcur = cshiftcur/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume&
+                   *pi*Echarge**3/2/hbar**2/Bohr_radius/100
+
+    linjectcur = linjectcur/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume&
+                   *pi*Echarge**3/hbar**2/Bohr_radius/100
+
+    cinjectcur = cinjectcur/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume&
+                   *pi*Echarge**3/2/hbar**2/Bohr_radius/100
+
 
     if (cpuid.eq.0) then
         outfileindex= outfileindex+ 1
