@@ -191,10 +191,8 @@ subroutine linear_optic
 
       
     !> in the latest version, we use the atomic unit
-    sigma_kubo_H = -sigma_kubo_H/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume&
-                  *pi*Echarge**2/hbar/Bohr_radius/100
-    sigma_kubo_AH = sigma_kubo_AH/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume&
-                   *Echarge**2/hbar*cmplx_i/Bohr_radius/100
+    sigma_kubo_H = -sigma_kubo_H * 1.0e8_dp *Echarge**2 / (hbar * Origin_cell%CellVolume) / 100
+    sigma_kubo_AH = sigma_kubo_AH * 1.0e8_dp *Echarge**2 / (hbar * Origin_cell%CellVolume) / 100
 
     if (cpuid.eq.0) then
         outfileindex= outfileindex+ 1
@@ -484,32 +482,34 @@ subroutine bulk_photovoltaic
    !
    ! (N is the number of kpoints, V_c is the cell volume). We want :
    !
-   ! LS = [ (e^3 * pi) / (2 * hbar^2) ] * lshiftcur / N * V_c
-   ! CS = [ (e^3 * pi) / (2 * hbar^2) ] * cshiftcur / N * V_c
-   ! LI = [ (e^3 * pi) / (hbar^2) ] * linjectcur / N * V_c
-   ! CI = [ (e^3 * pi) / (hbar^2) ] * cinjectcur / N * V_c
+   ! LS = [ (e^3 * pi) / (4 * hbar^2) ] * lshiftcur / N * V_c
+   ! CS = [ (e^3 * pi) / (4 * hbar^2) ] * cshiftcur / N * V_c
+   ! LI = [ (e^3 * pi) / (2 * hbar^2) ] * linjectcur / N * V_c
+   ! CI = [ (e^3 * pi) / (2 * hbar^2) ] * cinjectcur / N * V_c
    !
    ! --------------------------------------------------------------------
       
-    !> The calculation inside WannierTools uses atomic unit, the output uses SI unit.
+    !> The calculation inside WannierTools uses atomic unit, the outputs are in uA*Ang/V^2
 
-    lshiftcur = lshiftcur/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume&
-                   *pi*Echarge**3/2/hbar**2/Bohr_radius/100
+    !> The unit of shift current / inject current in atomic units is converted to uA*Ang/V² by:
+    !>  - 6.582119e-16: converts 1/eV (delta function) to seconds
+    !>  - pi*e/(4 hbar**2 V): from nonlinear shift current formula
+    !>  - pi*e/(2 hbar**2 V): from nonlinear shift current formula
+    !>  - 1/100: empirical scaling to match uA scale (unit adjustment)
 
-    cshiftcur = cshiftcur/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume&
-                   *pi*Echarge**3/2/hbar**2/Bohr_radius/100
+    lshiftcur = lshiftcur * 6.582119e-16_dp * pi *Echarge**3 / (4*hbar**2*Origin_cell%CellVolume) / 100
 
-    linjectcur = linjectcur/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume&
-                   *pi*Echarge**3/hbar**2/Bohr_radius/100
+    cshiftcur = cshiftcur * 6.582119e-16_dp * pi *Echarge**3 / (4*hbar**2*Origin_cell%CellVolume) / 100
 
-    cinjectcur = cinjectcur/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume&
-                   *pi*Echarge**3/2/hbar**2/Bohr_radius/100
+    linjectcur = linjectcur * 6.582119e-16_dp * pi *Echarge**3 / (2*hbar**2*Origin_cell%CellVolume) / 100
+
+    cinjectcur = cinjectcur * 6.582119e-16_dp * pi *Echarge**3 / (2*hbar**2*Origin_cell%CellVolume) / 100
 
 
     if (cpuid.eq.0) then
         outfileindex= outfileindex+ 1
         open(unit=outfileindex, file='linear_shift.dat')
-        write(outfileindex, '("#",10a)')' the linear shift conductivity'
+        write(outfileindex, '("#",10a)')' the linear shift conductivity in uA*Ang/V^2'
         write(outfileindex, "('#column', i5, 3000i16)")(i, i=1, 19)
         write(outfileindex, '("#",a13, 20a16)')'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
                                                 'yxx', 'yxy', 'yxz', 'yyy', 'yyz', 'yzz', 'zxx', 'zxy', 'zxz', &
@@ -522,7 +522,7 @@ subroutine bulk_photovoltaic
 
         outfileindex= outfileindex+ 1
         open(unit=outfileindex, file='circular_shift.dat')
-        write(outfileindex, '("#",10a)')' the circular shift conductivity'
+        write(outfileindex, '("#",10a)')' the circular shift conductivity in uA*Ang/V^2'
         write(outfileindex, "('#column', i5, 3000i16)")(i, i=1, 19)
         write(outfileindex, '("#",a13, 20a16)')'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
                                                 'yxx', 'yxy', 'yxz', 'yyy', 'yyz', 'yzz', 'zxx', 'zxy', 'zxz', &
@@ -535,7 +535,7 @@ subroutine bulk_photovoltaic
 
         outfileindex= outfileindex+ 1
         open(unit=outfileindex, file='circular_inject.dat')
-        write(outfileindex, '("#",10a)')' the circular inject conductivity'
+        write(outfileindex, '("#",10a)')' the circular inject conductivity in uA*Ang/V^2'
         write(outfileindex, "('#column', i5, 3000i16)")(i, i=1, 19)
         write(outfileindex, '("#",a13, 20a16)')'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
                                                 'yxx', 'yxy', 'yxz', 'yyy', 'yyz', 'yzz', 'zxx', 'zxy', 'zxz', &
@@ -548,7 +548,7 @@ subroutine bulk_photovoltaic
 
         outfileindex= outfileindex+ 1
         open(unit=outfileindex, file='linear_inject.dat')
-        write(outfileindex, '("#",10a)')' the circular inject conductivity'
+        write(outfileindex, '("#",10a)')' the circular inject conductivity in uA*Ang/V^2'
         write(outfileindex, "('#column', i5, 3000i16)")(i, i=1, 19)
         write(outfileindex, '("#",a13, 20a16)')'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
                                                 'yxx', 'yxy', 'yxz', 'yyy', 'yyz', 'yzz', 'zxx', 'zxy', 'zxz', &
