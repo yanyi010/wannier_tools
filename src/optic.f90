@@ -566,7 +566,7 @@ subroutine bulk_photovoltaic
        open(unit=outfileindex, file='bpve.gnu')
        write(outfileindex, '(a)') '# BPVE Spectrum: Type and Component'
        write(outfileindex, '(a)') 'type = "LS"    # LS, LI, CS, CI'
-       write(outfileindex, '(a)') 'col = 11        # 2=xxx, ..., 11=yyy '
+       write(outfileindex, '(a)') 'col = 11        # See below '
     
        write(outfileindex, '(a)') ''
        write(outfileindex, '(a)') 'component = ""'
@@ -603,7 +603,7 @@ subroutine bulk_photovoltaic
        write(outfileindex, '(a)') ''
        write(outfileindex, '(a)') 'set title sprintf("BPVE Conductivity (sigma-%s-%s)", type, component)'
        write(outfileindex, '(a)') 'set xlabel "Energy (eV)"'
-       write(outfileindex, '(a)') 'set ylabel "Conductivity (Ang {/Symbol m}A/V^{2})”'
+       write(outfileindex, '(a)') 'set ylabel "Conductivity (Ang {/Symbol m}A/V^{2})'
        write(outfileindex, '(a)') 'set grid'
        write(outfileindex, '(a)') ''
        write(outfileindex, '(a)') 'plot filename using 1:col title component with lines lw 5'
