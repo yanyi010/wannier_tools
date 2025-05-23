@@ -560,6 +560,60 @@ subroutine bulk_photovoltaic
         close(outfileindex)
     endif
 
+    outfileindex = outfileindex + 1
+    !> write script for gnuplot
+    if (cpuid == 0) then
+       open(unit=outfileindex, file='bpve.gnu')
+       write(outfileindex, '(a)') '# BPVE Spectrum: Type and Component'
+       write(outfileindex, '(a)') 'type = "LS"    # LS, LI, CS, CI'
+       write(outfileindex, '(a)') 'col = 11        # 2=xxx, ..., 11=yyy '
+    
+       write(outfileindex, '(a)') ''
+       write(outfileindex, '(a)') 'component = ""'
+       write(outfileindex, '(a)') 'if (col == 2) component = "xxx"'
+       write(outfileindex, '(a)') 'if (col == 3) component = "xxy"'
+       write(outfileindex, '(a)') 'if (col == 4) component = "xxz"'
+       write(outfileindex, '(a)') 'if (col == 5) component = "xyy"'
+       write(outfileindex, '(a)') 'if (col == 6) component = "xyz"'
+       write(outfileindex, '(a)') 'if (col == 7) component = "xzz"'
+       write(outfileindex, '(a)') 'if (col == 8) component = "yxx"'
+       write(outfileindex, '(a)') 'if (col == 9) component = "yxy"'
+       write(outfileindex, '(a)') 'if (col == 10) component = "yxz"'
+       write(outfileindex, '(a)') 'if (col == 11) component = "yyy"'
+       write(outfileindex, '(a)') 'if (col == 12) component = "yyz"'
+       write(outfileindex, '(a)') 'if (col == 13) component = "yzz"'
+       write(outfileindex, '(a)') 'if (col == 14) component = "zxx"'
+       write(outfileindex, '(a)') 'if (col == 15) component = "zxy"'
+       write(outfileindex, '(a)') 'if (col == 16) component = "zxz"'
+       write(outfileindex, '(a)') 'if (col == 17) component = "zyy"'
+       write(outfileindex, '(a)') 'if (col == 18) component = "zyz"'
+       write(outfileindex, '(a)') 'if (col == 19) component = "zzz"'
+    
+       write(outfileindex, '(a)') ''
+       write(outfileindex, '(a)') 'if (type eq "LS") filename = "linear_shift.dat"'
+       write(outfileindex, '(a)') 'if (type eq "LI") filename = "linear_inject.dat"'
+       write(outfileindex, '(a)') 'if (type eq "CS") filename = "circular_shift.dat"'
+       write(outfileindex, '(a)') 'if (type eq "CI") filename = "circular_inject.dat"'
+    
+       write(outfileindex, '(a)') ''
+       write(outfileindex, '(a)') 'outfile = sprintf("sigma_%s_%s.pdf", type, component)'
+       write(outfileindex, '(a)') ''
+       write(outfileindex, '(a)') 'set terminal pdfcairo enhanced font "Arial,30" size 6,6'
+       write(outfileindex, '(a)') 'set output outfile'
+       write(outfileindex, '(a)') ''
+       write(outfileindex, '(a)') 'set title sprintf("BPVE Conductivity (sigma-%s-%s)", type, component)'
+       write(outfileindex, '(a)') 'set xlabel "Energy (eV)"'
+       write(outfileindex, '(a)') 'set ylabel "Conductivity (Ang {/Symbol m}A/V^{2})”'
+       write(outfileindex, '(a)') 'set grid'
+       write(outfileindex, '(a)') ''
+       write(outfileindex, '(a)') 'plot filename using 1:col title component with lines lw 5'
+    endif
+
+    if (cpuid.eq.0) write(stdout, '(a)') ' <<< The Bulk Photovoltaic Effect calculation finished'
+    if (cpuid.eq.0) write(stdout, '(a)') ' '
+
+    return
+
 end subroutine bulk_photovoltaic
 
 subroutine generalderivative(W, V_Ham, D_Ham,  Wmn_Ham, gen_der_r)
