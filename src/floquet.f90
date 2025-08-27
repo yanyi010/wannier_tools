@@ -28,34 +28,39 @@ subroutine floquet_hamiltonian_atomicgauge(k, H_floquet, dimF)
     complex(dp) :: phase
 
     ! -------------------- field parameters -----------------------
+
     A0    = (/ A0_x, A0_y, A0_z /)  ! 线偏振-x
-    
     omega = Floquet_omega
-
-
-    T     = 2.0_dp * pi / omega
+    T     = twopi / omega
     dt    = T / real(Nt, dp)
 
     ! -------------------- init -----------------------
-    H_floquet = (0.0_dp, 0.0_dp)
 
+    H_floquet = (0.0_dp, 0.0_dp)
     allocate(Ham_t(Num_wann, Num_wann, Nt))
     allocate(Hdiff(Num_wann, Num_wann, -2*N_Floquet:2*N_Floquet))
     Hdiff = (0.0_dp, 0.0_dp)
 
-    ! -------------------- Step 1: build H(k+A(t)) over time ------
+    ! -------------------- Step 1: build H(k+A(t)) over time (Peierls Substitution)------
+
+    ! Two Problem: (1) Which gauge? (2) The substitution? e-charge and hbar?
+
     do i = 1, Nt
         times     = (i-1) * dt
         kshift(:) = k(:) + A0(:) * cos(omega * times)
+        
+        !call ham_bulk_latticegauge(kshift,Hk)
         call ham_bulk_atomicgauge(kshift, Hk)
+
         Ham_t(:,:,i) = Hk
     end do
 
-    ! -------------------- Step 2: Fourier comps H_p (p=m-n) ------
+    ! -------------------- Step 2: Fourier comps H_p (p=m-n) integration ------
     ! H_p = (1/T) ∫_0^T H(t) e^{i p ω t} dt
-    do p = -2*N_Floquet, 2*N_Floquet
-        Hdiff(:,:,p) = (0.0_dp, 0.0_dp)
-        do i = 1, Nt
+
+    do p = -2*N_Floquet, 2*N_Floquet  !> p= m-n, m, n ∈ [-N_F, N_F]. so p ∈ [-2*N_F, 2*N_F]
+        Hdiff(:,:,p) = (0.0_dp, 0.0_dp) !> zero complex
+        do i = 1, Nt !> Time-zone integration
             times = (i-1) * dt
             phase = exp((0.0_dp,1.0_dp) * real(p,dp) * omega * times)
             Hdiff(:,:,p) = Hdiff(:,:,p) + Ham_t(:,:,i) * phase * (dt / T)
@@ -98,7 +103,6 @@ subroutine floquet_band
     implicit none 
 
     integer :: ik, il, ig, io, i, j, knv3, ierr, dimF
-    !integer, parameter :: N_Floquet = 10   ! Floquet truncation order
     real(dp) :: emin,  emax,  k(3)
     character*40 :: filename
 
