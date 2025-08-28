@@ -31,7 +31,7 @@ subroutine floquet_hamiltonian_atomicgauge(k, H_floquet, dimF)
 
     A0    = (/ A0_x, A0_y, A0_z /)  ! 线偏振-x
     omega = Floquet_omega
-    T     = (twopi / omega) / Time_atomic
+    T     = (twopi / omega) 
     dt    = T / real(Nt, dp)
 
     write(stdout,*)'omega',omega, Floquet_omega
