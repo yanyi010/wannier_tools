@@ -31,8 +31,12 @@ subroutine floquet_hamiltonian_atomicgauge(k, H_floquet, dimF)
 
     A0    = (/ A0_x, A0_y, A0_z /)  ! 线偏振-x
     omega = Floquet_omega
-    T     = twopi / omega
+    T     = (twopi / omega) / Time_atomic
     dt    = T / real(Nt, dp)
+
+    write(stdout,*)'omega',omega, Floquet_omega
+    write(stdout,*)'T',T
+    write(stdout,*)'dt',dt
 
     ! -------------------- init -----------------------
 
@@ -48,10 +52,7 @@ subroutine floquet_hamiltonian_atomicgauge(k, H_floquet, dimF)
     do i = 1, Nt
         times     = (i-1) * dt
         kshift(:) = k(:) + A0(:) * cos(omega * times)
-        
-        !call ham_bulk_latticegauge(kshift,Hk)
         call ham_bulk_atomicgauge(kshift, Hk)
-
         Ham_t(:,:,i) = Hk
     end do
 
@@ -137,6 +138,7 @@ subroutine floquet_band
        ! 计算 Floquet 哈密顿量（为每个 k 构造 dimF×dimF 的 Floquet 大矩阵）
        H_floquet= 0d0
        call floquet_hamiltonian_atomicgauge(k, H_floquet, dimF)
+       write(stdout,*)'ik',ik
 
        ! 对角化
        W= 0d0
