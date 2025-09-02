@@ -17,6 +17,7 @@ subroutine floquet_hamiltonian_atomicgauge(k, H_floquet, dimF)
     ! -------------------- parameters & locals --------------------
     real(dp) :: omega, T, dt, times
     real(dp) :: A0(3), kshift(3)
+    real(dp) :: Ax_t, Ay_t, Az_t
     integer  :: i, j, m, n, p
     integer  :: idx_m, idx_n
 
@@ -50,8 +51,14 @@ subroutine floquet_hamiltonian_atomicgauge(k, H_floquet, dimF)
     ! Two Problem: (1) Which gauge? (2) The substitution? e-charge and hbar?
 
     do i = 1, Nt
-        times     = (i-1) * dt
-        kshift(:) = k(:) + A0(:) * cos(omega * times)
+        times  = (i-1) * dt
+        ! 圆偏振：A(t) = (A0_x cos(ωt), A0_y sin(ωt), A0_z cos(ωt))
+        Ax_t   = A0(1) * cos(omega * times)
+        Ay_t   = A0(2) * sin(omega * times)
+        Az_t   = A0(3) * cos(omega * times)
+        kshift(1) = k(1) + Ax_t
+        kshift(2) = k(2) + Ay_t
+        kshift(3) = k(3) + Az_t
         call ham_bulk_atomicgauge(kshift, Hk)
         !call ham_bulk_latticegauge(kshift, Hk)
         Ham_t(:,:,i) = Hk
@@ -105,6 +112,7 @@ subroutine floquet_band
     implicit none 
 
     integer :: ik, il, ig, io, i, j, knv3, ierr, dimF
+    integer :: m0_start, m0_end
     real(dp) :: emin,  emax,  k(3)
     character*40 :: filename
 
@@ -156,6 +164,16 @@ subroutine floquet_band
              enddo !i
           enddo !ig
        enddo !j
+
+       ! m=0 Floquet 子块投影权重（静态组分）
+       m0_start = N_Floquet*Num_wann + 1
+       m0_end   = (N_Floquet+1)*Num_wann
+       do j = 1, dimF
+          weight_sum(j, ik) = 0d0
+          do i = m0_start, m0_end
+             weight_sum(j, ik) = weight_sum(j, ik) + abs(H_floquet(i, j))**2
+          enddo
+       enddo
     enddo !ik
 
 #if defined (MPI)
@@ -166,6 +184,11 @@ subroutine floquet_band
 #else
     eigv_mpi= eigv
     weight_mpi= weight
+#endif
+
+#if defined (MPI)
+    call mpi_allreduce(MPI_IN_PLACE, weight_sum, size(weight_sum), &
+       mpi_dp, mpi_sum, mpi_cmw, ierr)
 #endif
 
     if (index(Particle,'phonon')/=0) then
@@ -207,6 +230,17 @@ subroutine floquet_band
           enddo ! i
           close(outfileindex)
        enddo ! il
+    endif
+
+    ! 输出 m=0 Floquet 组分权重
+    outfileindex= outfileindex+ 1
+    if (cpuid==0)then
+       open(unit=outfileindex, file='floquet_m0_weight.dat')
+       write(outfileindex, '(2a19)')'% klen', 'w_m0(n)'
+       do ik=1, knv3
+          write(outfileindex, '(2000f19.9)')k3len(ik)*Angstrom2atomic, weight_sum(:, ik)
+       enddo
+       close(outfileindex)
     endif
 
     outfileindex= outfileindex+ nk3lines+1
