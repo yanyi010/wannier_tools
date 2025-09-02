@@ -34,9 +34,9 @@ subroutine floquet_hamiltonian_atomicgauge(k, H_floquet, dimF)
     T     = (twopi / omega) 
     dt    = T / real(Nt, dp)
 
-    write(stdout,*)'omega',omega, Floquet_omega
-    write(stdout,*)'T',T
-    write(stdout,*)'dt',dt
+    !write(stdout,*)'omega',omega, Floquet_omega
+    !write(stdout,*)'T',T
+    !write(stdout,*)'dt',dt
 
     ! -------------------- init -----------------------
 
@@ -53,6 +53,7 @@ subroutine floquet_hamiltonian_atomicgauge(k, H_floquet, dimF)
         times     = (i-1) * dt
         kshift(:) = k(:) + A0(:) * cos(omega * times)
         call ham_bulk_atomicgauge(kshift, Hk)
+        !call ham_bulk_latticegauge(kshift, Hk)
         Ham_t(:,:,i) = Hk
     end do
 
