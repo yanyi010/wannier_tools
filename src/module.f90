@@ -646,9 +646,12 @@
         NumRandomConfs, NumSelectedEigenVals, projection_weight_mode, topsurface_atom_index, &
         photon_energy_arpes, polarization_xi_arpes, test_namelist, nnzmax_input, &
         polarization_alpha_arpes, polarization_delta_arpes, penetration_lambda_arpes, polarization_phi_arpes, &
-        FreqNum, FreqMin, FreqMax, eta_smr_fixed, N_Floquet, Nt, Floquet_omega, A0_x, A0_y, A0_z
+        FreqNum, FreqMin, FreqMax, eta_smr_fixed, N_Floquet, Nt, Floquet_omega, A0_x, A0_y, A0_z, Peierls_Mode
     
      real(Dp) :: E_fermi  ! Fermi energy, search E-fermi in OUTCAR for VASP, set to zero for Wien2k
+     
+     !> Peierls 替换模式: 0=atomic gauge k→k+A(t); 1=real-space lattice-gauge 相位
+     integer :: Peierls_Mode
 
      real(dp) :: surf_onsite  !> surface onsite energy shift
     

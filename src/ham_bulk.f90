@@ -93,6 +93,40 @@ subroutine ham_bulk_atomicgauge(k,Hamk_bulk)
 end subroutine ham_bulk_atomicgauge
 
 
+subroutine ham_bulk_peierls_realspace(k, Avec, Hamk_bulk)
+   ! 从实空间跳跃HmnR加入时间依赖矢势A(t)的Peierls相位：
+   ! tij(R) -> tij(R) * exp(i 2π (k·R + A(t)·r_ij))
+   ! 其中 r_ij = (R + r_j - r_i) 为分数坐标（与 irvec 和 wannier_centers_direct 一致）
+   use para, only : dp, twopi, zi, Num_wann, Nrpts, irvec, HmnR, ndegen, Origin_cell
+   implicit none
+
+   real(dp), intent(in) :: k(3)
+   real(dp), intent(in) :: Avec(3)   ! A 分数倒格单位，与 k 一致；偶极近似下无 e,ħ 之额外因子
+   complex(dp), intent(out) :: Hamk_bulk(Num_wann, Num_wann)
+
+   integer :: i1, i2, iR
+   real(dp) :: kdotR, kdotrij
+   real(dp) :: pos_direct(3)
+   complex(dp) :: phase_k, phase_A
+
+   Hamk_bulk = 0d0
+
+   do iR=1, Nrpts
+      do i2=1, Num_wann
+         do i1=1, Num_wann
+            pos_direct = irvec(:, iR) + Origin_cell%wannier_centers_direct(:, i2) - Origin_cell%wannier_centers_direct(:, i1)
+            kdotR   = k(1)*irvec(1,iR) + k(2)*irvec(2,iR) + k(3)*irvec(3,iR)
+            kdotrij = Avec(1)*pos_direct(1) + Avec(2)*pos_direct(2) + Avec(3)*pos_direct(3)
+            phase_k = cos(twopi*kdotR) + zi*sin(twopi*kdotR)
+            phase_A = cos(twopi*kdotrij) + zi*sin(twopi*kdotrij)
+            Hamk_bulk(i1, i2) = Hamk_bulk(i1, i2) + HmnR(i1, i2, iR) * phase_k * phase_A / ndegen(iR)
+         enddo
+      enddo
+   enddo
+
+   return
+end subroutine ham_bulk_peierls_realspace
+
 subroutine valley_k_atomicgauge(k,valley_k)
    ! This subroutine performs the Fourier transform of avalley operator
    ! History

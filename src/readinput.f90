@@ -645,7 +645,8 @@ subroutine readinput
    A0_x = 0.01_dp
    A0_y = 0.0_dp
    A0_z = 0.0_dp
-
+   Peierls_Mode = 0
+   
    !> by default, we only project on atoms for a given wave function
    projection_weight_mode = "NORMAL"
 
@@ -2366,7 +2367,6 @@ subroutine readinput
    if (.not.lfound .and.(BulkGap_plane_calc  .or. wanniercenter_calc)) then
       stop 'ERROR: please set KPLANE_bulk for gap or WCC calculations'
    endif
-
 !===============================================================================================================!
 !> KCUBE_BULK card
 !===============================================================================================================!
@@ -3124,7 +3124,6 @@ subroutine readinput
    if (.not.lfound.and.WeylChirality_calc.and.cpuid==0) then
       write(stdout, *) 'ERROR: you should specify the WEYL_CHIRALITY card, see documentation'
    endif
-
 !===============================================================================================================!
 !> SELECTED_ATOMS card
 !===============================================================================================================!
@@ -4660,8 +4659,6 @@ subroutine writeout_poscar(cell, poscarname)
    endif
    return
 end subroutine writeout_poscar
-
-
 !> generate the POSCAR for slab system
 !> necessary input:
 !> Nslab
@@ -5104,6 +5101,3 @@ subroutine eliminate_duplicates_with_tol(ndim1, ndim2, array2, Nleft, tol)
 
    return
 end subroutine eliminate_duplicates_with_tol
-
-
-
