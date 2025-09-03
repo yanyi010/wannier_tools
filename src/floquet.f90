@@ -61,8 +61,15 @@ subroutine floquet_hamiltonian_atomicgauge(k, H_floquet, dimF)
             kshift(2) = k(2) + Ay_t
             kshift(3) = k(3) + Az_t
             call ham_bulk_atomicgauge(kshift, Hk)
-        else
+        else if (Peierls_Mode == 1) then
             call ham_bulk_peierls_realspace(k, (/Ax_t, Ay_t, Az_t/), Hk)
+        else if (Peierls_Mode == 2) then
+            call ham_bulk_peierls_realspace_spatial(k, (/Ax_t, Ay_t, Az_t/), (/Aq_x, Aq_y, Aq_z/), times, Hk)
+        else
+            kshift(1) = k(1) + Ax_t
+            kshift(2) = k(2) + Ay_t
+            kshift(3) = k(3) + Az_t
+            call ham_bulk_atomicgauge(kshift, Hk)
         endif
         Ham_t(:,:,i) = Hk
     end do

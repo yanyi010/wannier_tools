@@ -645,6 +645,9 @@ subroutine readinput
    A0_x = 0.01_dp
    A0_y = 0.0_dp
    A0_z = 0.0_dp
+   Aq_x = 0.0_dp
+   Aq_y = 0.0_dp
+   Aq_z = 0.0_dp
    Peierls_Mode = 0
    
    !> by default, we only project on atoms for a given wave function
@@ -3127,7 +3130,6 @@ subroutine readinput
 !===============================================================================================================!
 !> SELECTED_ATOMS card
 !===============================================================================================================!
-
 ! SELECTED_ATOMS
 ! 2 ! NumberofSelectedAtoms_groups
 ! 1-3  8  ! atom indicies of group 1

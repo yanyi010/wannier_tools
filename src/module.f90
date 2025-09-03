@@ -636,6 +636,8 @@
      integer :: Nt
      real(dp) :: Floquet_omega
      real(dp) :: A0_x, A0_y, A0_z
+     !> spatial wavevector (fractional reciprocal units) for A(r,t)
+     real(dp) :: Aq_x, Aq_y, Aq_z
 
      !> namelist parameters
      namelist /PARAMETERS/ E_arc, Fermi_broadening, EF_integral_range, OmegaNum, OmegaNum_unfold, OmegaMin, OmegaMax, &
@@ -646,7 +648,7 @@
         NumRandomConfs, NumSelectedEigenVals, projection_weight_mode, topsurface_atom_index, &
         photon_energy_arpes, polarization_xi_arpes, test_namelist, nnzmax_input, &
         polarization_alpha_arpes, polarization_delta_arpes, penetration_lambda_arpes, polarization_phi_arpes, &
-        FreqNum, FreqMin, FreqMax, eta_smr_fixed, N_Floquet, Nt, Floquet_omega, A0_x, A0_y, A0_z, Peierls_Mode
+        FreqNum, FreqMin, FreqMax, eta_smr_fixed, N_Floquet, Nt, Floquet_omega, A0_x, A0_y, A0_z, Peierls_Mode, Aq_x, Aq_y, Aq_z
     
      real(Dp) :: E_fermi  ! Fermi energy, search E-fermi in OUTCAR for VASP, set to zero for Wien2k
      

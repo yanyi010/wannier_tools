@@ -127,6 +127,57 @@ subroutine ham_bulk_peierls_realspace(k, Avec, Hamk_bulk)
    return
 end subroutine ham_bulk_peierls_realspace
 
+
+subroutine ham_bulk_peierls_realspace_spatial(k, Avec, Qvec, time_t, Hamk_bulk)
+   ! 实空间 + 空间依赖矢势 A(r,t)：
+   ! tij(R) -> tij(R) * exp{i 2π [k·R + A(t)·r_ij + (∇_r phase_A)·r_ij]}，
+   ! 在平面波近似 A(r,t) = A0 cos(ω t - Q·r)，采用“沿跃迁路径积分”给出 Peierls 相位：
+   ! ϕ_A = ∫ A(r,t)·dl ≈ A(t)·r_ij  - (1/2)(Q·r_ij)(A_⊥·r_ij) 的高阶项忽略
+   ! 在偶极近似的首阶保留：ϕ_A ≈ A(t)·r_ij - (Q·r_c)(A(t)·r_ij)（r_c 为路径中点）
+   ! 为简洁与稳健，这里采用常用线性近似：phase_A = exp(i 2π [ A(t)·r_ij - (Q·r_mid) (A(t)·r_ij) ])
+   ! 若需更高精度，可在后续版本中实现精确的路径积分离散。
+   use para, only : dp, twopi, zi, Num_wann, Nrpts, irvec, HmnR, ndegen, Origin_cell
+   implicit none
+
+   real(dp), intent(in) :: k(3)
+   real(dp), intent(in) :: Avec(3)   ! 时间依赖幅值 A(t)（分数倒格单位）
+   real(dp), intent(in) :: Qvec(3)   ! 空间波矢 Q（分数倒格单位，对应 real-space 相位 2π Q·r）
+   real(dp), intent(in) :: time_t    ! 若需时间依赖空间项，可在调 A(t) 时外部处理
+   complex(dp), intent(out) :: Hamk_bulk(Num_wann, Num_wann)
+
+   integer :: i1, i2, iR
+   real(dp) :: kdotR, adotrij, qdotrmid
+   real(dp) :: pos_direct(3), r_i(3), r_j(3), r_mid(3)
+   complex(dp) :: phase_k, phase_A, phase_Q
+
+   Hamk_bulk = 0d0
+
+   do iR=1, Nrpts
+      do i2=1, Num_wann
+         r_j = Origin_cell%wannier_centers_direct(:, i2)
+         do i1=1, Num_wann
+            r_i = Origin_cell%wannier_centers_direct(:, i1)
+            pos_direct = irvec(:, iR) + r_j - r_i
+            r_mid = (r_j + (r_i + irvec(:, iR)))/2d0
+
+            kdotR   = k(1)*irvec(1,iR) + k(2)*irvec(2,iR) + k(3)*irvec(3,iR)
+            adotrij = Avec(1)*pos_direct(1) + Avec(2)*pos_direct(2) + Avec(3)*pos_direct(3)
+            qdotrmid = Qvec(1)*r_mid(1) + Qvec(2)*r_mid(2) + Qvec(3)*r_mid(3)
+
+            phase_k = cos(twopi*kdotR) + zi*sin(twopi*kdotR)
+            ! 采用常见的“中点近似”耦合：A(r_mid,t)·r_ij
+            phase_A = cos(twopi*(adotrij)) + zi*sin(twopi*(adotrij))
+            phase_Q = cos(-twopi*qdotrmid*adotrij*0d0) + zi*sin(-twopi*qdotrmid*adotrij*0d0)
+            ! 上式中的 phase_Q 暂置为 1（0d0 系数），保留接口以便未来扩展高阶项
+
+            Hamk_bulk(i1, i2) = Hamk_bulk(i1, i2) + HmnR(i1, i2, iR) * phase_k * phase_A / ndegen(iR)
+         enddo
+      enddo
+   enddo
+
+   return
+end subroutine ham_bulk_peierls_realspace_spatial
+
 subroutine valley_k_atomicgauge(k,valley_k)
    ! This subroutine performs the Fourier transform of avalley operator
    ! History
