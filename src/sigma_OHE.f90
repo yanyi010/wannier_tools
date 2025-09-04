@@ -1196,6 +1196,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       complex(dp) :: factor
       !> velocity operator
       real(dp), allocatable :: W(:)
+      real(dp), allocatable :: W_floquet(:)
       complex(dp), allocatable :: vx(:, :)
       complex(dp), allocatable :: vy(:, :)
       complex(dp), allocatable :: vz(:, :)
@@ -1208,6 +1209,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       allocate( vz(Num_wann, Num_wann))
       allocate( UU(Num_wann, Num_wann))
       allocate( Hamk_bulk(Num_wann, Num_wann))
+      allocate( W_floquet(Num_wann))
  
       ! calculation bulk hamiltonian
       call ham_bulk_latticegauge(k, Hamk_bulk)
@@ -1216,9 +1218,20 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       W= 0d0
       UU=Hamk_bulk
       call eigensystem_c( 'V', 'U', Num_wann, UU, W)
-      do iband=1, Nband_Fermi_Level
-         Ek(iband)= W(bands_fermi_level(iband))
-      enddo
+
+      
+      if (Floquet_OHE_calc) then
+         !write(stdout, *) ' Floquet OHE :', Floquet_OHE_calc
+         ! 计算零阶 Floquet 准能：从完整的Floquet哈密顿量中提取，去除m*omega平移项
+         call calculate_zero_order_floquet_quasienergies(k, W_floquet)
+         do iband=1, Nband_Fermi_Level
+            Ek(iband)= W_floquet(bands_fermi_level(iband))
+         enddo
+      else
+         do iband=1, Nband_Fermi_Level
+            Ek(iband)= W(bands_fermi_level(iband))
+         enddo
+      endif
 
       vx= 0d0
       vy= 0d0
@@ -1243,6 +1256,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       if (allocated(vz))deallocate(vz)
       if (allocated(UU))deallocate(UU)
       if (allocated(Hamk_bulk))deallocate(Hamk_bulk)
+      if (allocated(W_floquet))deallocate(W_floquet)
 
       return
    end subroutine velocity_calc
@@ -3294,4 +3308,77 @@ subroutine r8_fehl ( f, neqn, y, t, h, yp, f1, f2, f3, f4, f5, s, iband, magneti
 
   return
 end  subroutine r8_fehl
+
+!> 计算零阶Floquet准能的子程序
+!> 从完整的Floquet哈密顿量中提取零阶准能，去除m*omega平移项
+subroutine calculate_zero_order_floquet_quasienergies(k, W_floquet)
+    use wmpi
+    use para
+    implicit none
+    
+    ! Input
+    real(dp), intent(in) :: k(3)
+    
+    ! Output
+    real(dp), intent(out) :: W_floquet(Num_wann)
+    
+    ! Local variables
+    integer :: dimF
+    complex(dp), allocatable :: H_floquet(:, :)
+    real(dp), allocatable :: W_full(:)
+    complex(dp), allocatable :: U_full(:, :)
+    integer :: i, j, m, n, idx_m, idx_n
+    integer :: m0_start, m0_end
+    real(dp) :: omega
+    real(dp), allocatable :: weight_sum(:)
+    integer :: max_weight_idx(Num_wann)
+    
+    ! 计算Floquet哈密顿量的维度
+    dimF = (2*N_Floquet + 1) * Num_wann
+    omega = Floquet_omega
+    
+    ! 分配内存
+    allocate(H_floquet(dimF, dimF))
+    allocate(W_full(dimF))
+    allocate(U_full(dimF, dimF))
+    allocate(weight_sum(dimF))
+    
+    ! 计算完整的Floquet哈密顿量
+    H_floquet = (0.0_dp, 0.0_dp)
+    call floquet_hamiltonian_atomicgauge(k, H_floquet, dimF)
+    
+    ! 对角化Floquet哈密顿量
+    W_full = 0.0_dp
+    U_full = H_floquet
+    call eigensystem_c('V', 'U', dimF, U_full, W_full)
+    
+    ! 计算每个本征态在m=0子空间中的投影权重
+    m0_start = N_Floquet * Num_wann + 1
+    m0_end = (N_Floquet + 1) * Num_wann
+    
+    do j = 1, dimF
+        weight_sum(j) = 0.0_dp
+        do i = m0_start, m0_end
+            weight_sum(j) = weight_sum(j) + abs(U_full(i, j))**2
+        enddo
+    enddo
+    
+    ! 为每个原始能带找到在m=0子空间中权重最大的Floquet本征态
+    do i = 1, Num_wann
+        ! 找到权重最大的本征态
+        max_weight_idx(i) = maxloc(weight_sum, 1)
+        
+        ! 提取零阶准能
+        ! 零阶准能是Floquet本征值，但需要确保选择的是真正的零阶准能
+        ! 在Floquet理论中，零阶准能对应于m=0的子空间，不包含m*omega平移项
+        W_floquet(i) = W_full(max_weight_idx(i))
+        
+        ! 将已使用的本征态权重设为0，避免重复选择
+        weight_sum(max_weight_idx(i)) = 0.0_dp
+    enddo
+    
+    ! 清理内存
+    deallocate(H_floquet, W_full, U_full, weight_sum)
+    
+end subroutine calculate_zero_order_floquet_quasienergies
 

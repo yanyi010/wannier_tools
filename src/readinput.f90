@@ -168,6 +168,7 @@ subroutine readinput
    BPVE_calc = .FALSE.
 
    Floquet_band_calc = .FALSE.
+   Floquet_OHE_calc = .FALSE.
 
    read(1001, CONTROL, iostat=stat)
    SlabQPI_kplane_calc= SlabQPI_kplane_calc.or.SlabQPI_calc
@@ -229,6 +230,7 @@ subroutine readinput
       write(*, *)"linear_optic_calc"
       write(*, *)"BPVE_calc"
       write(*, *)"Floquet_band_calc"
+      write(*, *)"Floquet_OHE_calc"
       write(*, *)"The default Vaule is F"
 
       backspace(1001)
@@ -314,6 +316,7 @@ subroutine readinput
       write(stdout, *) "linear_optic_calc        : ",  linear_optic_calc
       write(stdout, *) "BPVE_calc       : ",  BPVE_calc
       write(stdout, *) "Floquet_band_calc       : ",  Floquet_band_calc
+      write(stdout, *) "Floquet_OHE_calc       : ",  Floquet_OHE_calc
    endif
 
    Wilsonloop_calc= Wilsonloop_calc.or.wanniercenter_calc
