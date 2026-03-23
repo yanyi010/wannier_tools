@@ -14,21 +14,18 @@ OBJ =  module.o sparse.o wt_aux.o math_lib.o symmetry.o \
 		main.o
 
 # compiler
-#F90  = mpif90 -fpp -DMPI -fpe3 -O3 -DARPACK -DINTELMKL #-check all -traceback -g
-F90  = gfortran -cpp  #-check all -traceback -g
+F90  = mpiifort -fpp -DMPI -fpe3 -O3 -DARPACK -DINTELMKL #-check all -traceback -g
 #F90  = ifort -fpp  -DINTELMKL -fpe3 -check all -traceback -g
-#CC = mpicc -cpp -O3 -DINTELMKL 
-CC = gcc -cpp   -ffree-line-length-512
+CC = mpicc -cpp -O3 -DINTELMKL 
 
 INCLUDE = -I${MKLROOT}/include
-WFLAG =  #-nogen-interface
-OFLAG = # -O3 -static-intel
+WFLAG = -nogen-interface
+OFLAG = -O3 -static-intel
 FFLAG = $(OFLAG) $(WFLAG)
 LFLAG = $(OFLAG)
 
 # ARPACK LIBRARY
-#ARPACK=/Users/user/quan/work/workplace/ARPACK/libarpack_MAC.a
-ARPACK=/Users/user/quan/work/workplace/ARPACK/libarpack_MAC_gfortran.a
+ARPACK=/data/home/yanyi2024/0-tools/0-Basic/ARPACK/libarpack_MAC.a
 
 # blas and lapack libraries
 # static linking
@@ -38,12 +35,11 @@ ARPACK=/Users/user/quan/work/workplace/ARPACK/libarpack_MAC_gfortran.a
 		  ${ARPACK}
 
 # dynamic linking
-#LIBS = ${ARPACK} -L/${MKLROOT}/lib/intel64 -lmkl_core -lmkl_sequential -lmkl_intel_lp64 -lpthread 
-LIBS = ${ARPACK} -llapack  -lblas
+LIBS = ${ARPACK} -L${MKLROOT}/lib/intel64 -lmkl_core -lmkl_sequential -lmkl_intel_lp64 -lpthread 
  
 main : $(OBJ)
-	$(F90) $(LFLAG) $(OBJ) -o wt.x $(LIBS)
-	cp -f wt.x ../bin
+	$(F90) $(LFLAG) $(OBJ) -o wt-yy.x $(LIBS)
+	cp -f wt-yy.x ../bin
 
 .SUFFIXES: .o .f90 .c
 
@@ -51,4 +47,4 @@ main : $(OBJ)
 	$(F90) $(FFLAG) $(INCLUDE) -c $*.f90
 
 clean :
-	rm -f *.o *.mod *~ wt.x
+	rm -f *.o *.mod *~ wt-yy.x
