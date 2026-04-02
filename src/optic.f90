@@ -2,151 +2,115 @@ subroutine linear_optic
     use wmpi
     use para
     implicit none
-    
-   !------------------------------------------------------------------!
-   !> This subroutine is to calculate the linear optical conductivity !                                                                           !
-   !> Use TBA approximation                                           !
-   !> Written by Hanqi Pi (hqpi1999@gmail.com)                        !
-   !> Modified by Yi Yan (yanyi200207@gmail.com)                      !
-   !>                                                                 !
-   !>  NOTE: This subroutine is NOT ACCOMPLISHED YET                  !
-   !>                                                                 !
-   !> Reference : PHYSICAL REVIEW B 97, 245143 (2018)                 !
-   !------------------------------------------------------------------!
-    
-    integer :: ik, ikx, iky, ikz, knv3, ifreq, i, j, m, n, index, ierr
 
+   !------------------------------------------------------------------!
+   !> This subroutine calculates the interband optical conductivity   !
+   !> within a conservative diagonal-TBA implementation.               !
+   !> It does not include off-diagonal position matrix elements, a     !
+   !> complete Wannier-gauge optical matrix, or a degenerate-subspace  !
+   !> treatment.                                                       !
+   !------------------------------------------------------------------!
+
+    integer :: ik, ikx, iky, ikz, knv3, ifreq, i, j, m, n, index, ierr
     real(dp) :: k(3), time_start, time_end, x, fac_H, fac_AH
-    complex(dp) :: cmplx_i, cmplx_1, cmplx_0, omega
+    real(dp) :: delta_E, k_weight, degen_tol, sigma_scale_H, sigma_scale_AH
+    complex(dp) :: cmplx_i, cmplx_0, omega, kernel_AH
 
     complex(dp), allocatable :: Freq_array(:)
 
-    !> Hermitian and anti-Hermitian part of conductivity tensor
-    !> dimention: 3*3*FreqNum
+    !> Hermitian and anti-Hermitian parts of the interband conductivity tensor.
     complex(dp), allocatable :: sigma_kubo_H(:, :, :)
     complex(dp), allocatable :: sigma_kubo_H_mpi(:, :, :)
     complex(dp), allocatable :: sigma_kubo_AH(:, :, :)
     complex(dp), allocatable :: sigma_kubo_AH_mpi(:, :, :)
 
-    !> eigen value of H
     real(dp), allocatable :: W(:)
     complex(dp), allocatable :: Hamk_bulk(:, :)
     complex(dp), allocatable :: UU(:, :)
     real(dp), allocatable :: occ(:)
 
-    !> V^ham_mn = UU_mj*dHdk*UU_jn
     complex(dp), allocatable :: V_ham(:, :, :)
-    complex(dp), allocatable :: dHdk(:, :, :)
-
-    !> D^ham_mn=V^ham_mn/(En-Em) for m!=n
-    !> D_nn=0 
     complex(dp), allocatable :: D_ham(:, :, :)
-
-    !> AA_mn = i*D_mn
     complex(dp), allocatable :: AA(:, :, :)
 
-    !> delta function
     real(dp), external :: delta
 
-    !> Re(sigma_S_xx), Im(sigma_S_xx), Re(sigma_S_yy), Im(sigma_S_yy), ...
-    !> Re(sigma_A_yz), Im(sigma_A_yz), Re(sigma_A_zx), Im(sigma_A_zx), ...
     real(dp) :: sigma_S(12), sigma_A(6)
     integer :: alpha_S(6), beta_S(6), alpha_A(3), beta_A(3)
 
-    !> 1 <--> xx
-    !> 2 <--> yy
-    !> 3 <--> zz
-    !> 4 <--> xy
-    !> 5 <--> xz
-    !> 6 <--> yz
     alpha_S = (/1, 2, 3, 1, 1, 2/)
     beta_S = (/1, 2, 3, 2, 3, 3/)
-    !> 1 <--> (y,z)
-    !> 2 <--> (z,x)
-    !> 3 <--> (x,y)
     alpha_A = (/2, 3, 1/)
     beta_A = (/3, 1, 2/)
 
     cmplx_i = (0.0d0, 1.0d0)
-    cmplx_1 = (1.0d0, 0.0d0)
     cmplx_0 = (0.0d0, 0.0d0)
+    degen_tol = eps6
 
-    allocate( W (Num_wann))
-    allocate( Hamk_bulk(Num_wann, Num_wann))
-    allocate( UU(Num_wann, Num_wann))
-    allocate( occ(Num_wann))
-
+    allocate(W(Num_wann))
+    allocate(Hamk_bulk(Num_wann, Num_wann))
+    allocate(UU(Num_wann, Num_wann))
+    allocate(occ(Num_wann))
     allocate(D_ham(Num_wann, Num_wann, 3))
     allocate(V_ham(Num_wann, Num_wann, 3))
-    allocate(dHdk(Num_wann, Num_wann, 3))
     allocate(AA(Num_wann, Num_wann, 3))
-
     allocate(sigma_kubo_H(3, 3, FreqNum))
     allocate(sigma_kubo_H_mpi(3, 3, FreqNum))
     allocate(sigma_kubo_AH(3, 3, FreqNum))
     allocate(sigma_kubo_AH_mpi(3, 3, FreqNum))
-
     allocate(Freq_array(FreqNum))
 
     W = 0.0_dp
     Hamk_bulk = cmplx_0
     UU = cmplx_0
+    occ = 0.0_dp
+    D_ham = cmplx_0
+    V_ham = cmplx_0
     AA = cmplx_0
     sigma_kubo_H = cmplx_0
     sigma_kubo_H_mpi = cmplx_0
     sigma_kubo_AH = cmplx_0
     sigma_kubo_AH_mpi = cmplx_0
-    Freq_array = 0.0_dp
+    Freq_array = cmplx_0
 
-    if (FreqNum==1) then
-        Freq_array(1)= FreqMin + cmplx_i*eta_smr_fixed
+    if (FreqNum == 1) then
+        Freq_array(1) = FreqMin + cmplx_i*eta_smr_fixed
     else
         do i = 1, FreqNum
-            Freq_array(i)= FreqMin+ (FreqMax-FreqMin)* (i-1d0)/dble(FreqNum-1) + cmplx_i*eta_smr_fixed
-        enddo ! i
+            Freq_array(i) = FreqMin + (FreqMax-FreqMin)*(i-1d0)/dble(FreqNum-1) + cmplx_i*eta_smr_fixed
+        end do
     endif
 
-    knv3= Nk1*Nk2*Nk3
+    knv3 = Nk1*Nk2*Nk3
 
-    call now(time_start) 
-    do ik= 1+ cpuid, knv3, num_cpu
-        if (cpuid.eq.0.and. mod(ik/num_cpu, 100).eq.0) then
-            call now(time_end) 
+    call now(time_start)
+    do ik = 1+cpuid, knv3, num_cpu
+        if (cpuid.eq.0 .and. mod(ik/num_cpu, 100).eq.0) then
+            call now(time_end)
             write(stdout, '(a, i18, "/", i18, a, f10.2, "s")') 'ik/knv3', &
-            ik, knv3, '  time left', (knv3-ik)*(time_end-time_start)/num_cpu/100d0
-            time_start= time_end
+                ik, knv3, '  time left', (knv3-ik)*(time_end-time_start)/num_cpu/100d0
+            time_start = time_end
         endif
 
-        ikx= (ik-1)/(nk2*nk3)+1
-        iky= ((ik-1-(ikx-1)*Nk2*Nk3)/nk3)+1
-        ikz= (ik-(iky-1)*Nk3- (ikx-1)*Nk2*Nk3)
-        k= K3D_start_cube+ K3D_vec1_cube*(ikx-1)/dble(nk1)  &
-            + K3D_vec2_cube*(iky-1)/dble(nk2)  &
+        ikx = (ik-1)/(nk2*nk3)+1
+        iky = ((ik-1-(ikx-1)*Nk2*Nk3)/nk3)+1
+        ikz = (ik-(iky-1)*Nk3-(ikx-1)*Nk2*Nk3)
+        k = K3D_start_cube + K3D_vec1_cube*(ikx-1)/dble(nk1) &
+            + K3D_vec2_cube*(iky-1)/dble(nk2) &
             + K3D_vec3_cube*(ikz-1)/dble(nk3)
 
-        ! calculation bulk hamiltonian by a direct Fourier transformation of HmnR
         call ham_bulk_atomicgauge(k, Hamk_bulk)
-        ! call ham_bulk_latticegauge(k, Hamk_bulk)
 
-        !> diagonalization by call zheev in lapack
-        UU=Hamk_bulk
-        call eigensystem_c( 'V', 'U', Num_wann, UU, W)
+        UU = Hamk_bulk
+        call eigensystem_c('V', 'U', Num_wann, UU, W)
 
-        ! Since the Fermi Level has already been extracted in readHmnR.f90, we just need to compare W(i) with 0eV
         occ = 0.0_dp
         do i = 1, Num_wann
             if (W(i) < 0.0_dp) occ(i) = 1.0_dp
         end do
 
-        !> get velocity operator in Hamiltonian basis
         call dHdk_atomicgauge_Ham(k, UU, V_Ham)
-        ! dHdk = cmplx_0
-        ! call dHdk_latticegauge_wann(k, dHdk)
-        ! call dHdk_latticegauge_Ham2(UU, dHdk, V_Ham)
-
-        call get_Dmn_Ham(W, V_Ham, D_Ham)
-
-        !> here we use TBA approximation 
+        call get_Dmn_Ham_safe(W, V_Ham, degen_tol, D_Ham)
         AA = cmplx_i*D_Ham
 
         do ifreq = 1, FreqNum
@@ -154,83 +118,90 @@ subroutine linear_optic
             do m = 1, Num_wann
                 do n = 1, Num_wann
                     if (n == m) cycle
-                    x = W(m)-W(n)-real(omega)
-                    fac_H = delta(eta_smr_fixed, x)*(occ(m)-occ(n))*(W(m)-W(n))
-                    fac_AH = (occ(m)-occ(n))*(W(m)-W(n))/real((W(m)-W(n)-omega))
+                    if (abs(occ(m)-occ(n)) < eps9) cycle
+
+                    delta_E = W(m) - W(n)
+                    x = delta_E - real(omega, dp)
+                    fac_H = delta(eta_smr_fixed, x)*(occ(m)-occ(n))*delta_E
+
+                    kernel_AH = cmplx(delta_E, 0.0_dp, dp) / (cmplx(delta_E, 0.0_dp, dp) - omega)
+                    fac_AH = (occ(m)-occ(n))*real(kernel_AH, dp)
+
                     do j = 1, 3
                         do i = 1, 3
                             sigma_kubo_H_mpi(i, j, ifreq) = sigma_kubo_H_mpi(i, j, ifreq) &
-                                                      + AA(n, m, i)*AA(m, n, j)* fac_H
+                                + AA(n, m, i)*AA(m, n, j)*fac_H
                             sigma_kubo_AH_mpi(i, j, ifreq) = sigma_kubo_AH_mpi(i, j, ifreq) &
-                                                       + AA(n, m, i)*AA(m, n, j)*fac_AH
-                        enddo 
-                    enddo 
-                enddo 
-            enddo 
-        enddo 
-
-    enddo ! ik
+                                + AA(n, m, i)*AA(m, n, j)*fac_AH
+                        end do
+                    end do
+                end do
+            end do
+        end do
+    end do
 
 #if defined (MPI)
-    call mpi_allreduce(sigma_kubo_H_mpi, sigma_kubo_H, size(sigma_kubo_H), mpi_dc,mpi_sum,mpi_cmw,ierr)
-    call mpi_allreduce(sigma_kubo_AH_mpi, sigma_kubo_AH, size(sigma_kubo_AH), mpi_dc,mpi_sum,mpi_cmw,ierr)
+    call mpi_allreduce(sigma_kubo_H_mpi, sigma_kubo_H, size(sigma_kubo_H), mpi_dc, mpi_sum, mpi_cmw, ierr)
+    call mpi_allreduce(sigma_kubo_AH_mpi, sigma_kubo_AH, size(sigma_kubo_AH), mpi_dc, mpi_sum, mpi_cmw, ierr)
 #else
     sigma_kubo_H = sigma_kubo_H_mpi
     sigma_kubo_AH = sigma_kubo_AH_mpi
 #endif
 
-   ! ------------------------------------------------------------------------
-   ! At this point 
-   !
-   ! sigma_kubo_H =N*V_c*int dk/(2pi)^3 (f_m-f_n)*(E_m-E_n)*A_nm*A_mn*delta(Em-En-omega)
-   ! sigma_kubo_AH=N*V_c*int dk/(2pi)^3 (f_m-f_n)*Re[(E_m-E_n)/(E_m-E_n-omega-i*eta)]*A_nm*A_mn
-   !
-   ! (N is the number of kpoints, V_c is the cell volume). We want
-   !
-   ! sigma_kubo_H =-pi*e^2/hbar* int dk/(2pi)^3 (f_m-f_n)*(E_m-E_n)*A_nm*A_mn*delta(Em-En-omega)
-   ! sigma_kubo_AH=i*e^2/hbar* int dk/(2pi)^3 (f_m-f_n)*Re[(E_m-E_n)/(E_m-E_n-omega-i*eta)]*A_nm*A_mn
-   ! 
-   ! --------------------------------------------------------------------
+    !> The accumulated sums are normalized to the sampled k volume and then
+    !> converted from atomic units to the interband optical conductivity in S/cm.
+    k_weight = kCubeVolume / Origin_cell%ReciprocalCellVolume / dble(knv3)
+    sigma_kubo_H = sigma_kubo_H * k_weight
+    sigma_kubo_AH = sigma_kubo_AH * k_weight
 
-      
-    !> in the latest version, we use the atomic unit
-    sigma_kubo_H = -sigma_kubo_H * 1.0e8_dp *Echarge**2 / (hbar * Origin_cell%CellVolume) / 100
-    sigma_kubo_AH = sigma_kubo_AH * 1.0e8_dp *Echarge**2 / (hbar * Origin_cell%CellVolume) / 100
+    sigma_scale_H = -pi * Echarge**2 / (hbar * Bohr_radius * Origin_cell%CellVolume) / 100d0
+    sigma_scale_AH = Echarge**2 / (hbar * Bohr_radius * Origin_cell%CellVolume) / 100d0
+    sigma_kubo_H = sigma_kubo_H * sigma_scale_H
+    sigma_kubo_AH = cmplx_i * sigma_kubo_AH * sigma_scale_AH
+
+    call validate_complex_tensor_3d('sigma_kubo_H', sigma_kubo_H, 3, 3, FreqNum)
+    call validate_complex_tensor_3d('sigma_kubo_AH', sigma_kubo_AH, 3, 3, FreqNum)
 
     if (cpuid.eq.0) then
-        outfileindex= outfileindex+ 1
+        outfileindex = outfileindex + 1
         open(unit=outfileindex, file='sigma_kubo_symm.dat')
-        write(outfileindex, '("#",10a)')' the symmetric part of linear conductivity'
+        write(outfileindex, '("#",a)') 'Symmetric interband optical conductivity in S/cm'
+        write(outfileindex, '("#",a)') 'Diagonal TBA; 0 K step occupation; no intraband/Drude contribution'
+        write(outfileindex, '("#",a)') '3D bulk normalization; for slab/supercell models the result depends on the vacuum thickness'
+        write(outfileindex, '("#",a)') 'No off-diagonal position matrix elements or degenerate-subspace treatment are included'
         write(outfileindex, "('#column', i5, 3000i16)")(i, i=1, 13)
-        write(outfileindex, '("#",a13, 20a16)')'Frequency (eV)', 'Re[\sigma_xx]', 'Im[\sigma_xx]', 'Re[\sigma_yy]', &
-                            'Im[\sigma_yy]', 'Re[\sigma_zz]', 'Im[\sigma_zz]', 'Re[\sigma_xy]', 'Im[\sigma_xy]', &
-                            'Im[\sigma_xz]', 'Re[\sigma_xz]', 'Im[\sigma_yz]', 'Re[\sigma_yz]'
-        do ifreq=1, FreqNum
+        write(outfileindex, '("#",a16, 20a16)') 'Frequency (eV)', 'Re[\sigma_xx]', 'Im[\sigma_xx]', 'Re[\sigma_yy]', &
+            'Im[\sigma_yy]', 'Re[\sigma_zz]', 'Im[\sigma_zz]', 'Re[\sigma_xy]', 'Im[\sigma_xy]', &
+            'Re[\sigma_xz]', 'Im[\sigma_xz]', 'Re[\sigma_yz]', 'Im[\sigma_yz]'
+        do ifreq = 1, FreqNum
             do index = 1, 6
                 i = alpha_S(index)
                 j = beta_S(index)
                 sigma_S(index*2-1) = real(0.5_dp*(sigma_kubo_H(i, j, ifreq) + sigma_kubo_H(j, i, ifreq)), dp)
-                sigma_S(index*2)   = aimag(0.5_dp*(sigma_kubo_AH(i, j, ifreq) + sigma_kubo_AH(j, i, ifreq)))
-            enddo
+                sigma_S(index*2) = aimag(0.5_dp*(sigma_kubo_AH(i, j, ifreq) + sigma_kubo_AH(j, i, ifreq)))
+            end do
             write(outfileindex, '(200E16.8)') real(Freq_array(ifreq), dp)/eV2Hartree, sigma_S
-        enddo 
+        end do
         close(outfileindex)
 
-        outfileindex= outfileindex+ 1
+        outfileindex = outfileindex + 1
         open(unit=outfileindex, file='sigma_kubo_asymm.dat')
-        write(outfileindex, '("#",10a)')' the antisymmetric part of linear conductivity'
+        write(outfileindex, '("#",a)') 'Antisymmetric interband optical conductivity in S/cm'
+        write(outfileindex, '("#",a)') 'Diagonal TBA; 0 K step occupation; no intraband/Drude contribution'
+        write(outfileindex, '("#",a)') '3D bulk normalization; for slab/supercell models the result depends on the vacuum thickness'
+        write(outfileindex, '("#",a)') 'No off-diagonal position matrix elements or degenerate-subspace treatment are included'
         write(outfileindex, "('#column', i5, 3000i16)")(i, i=1, 7)
-        write(outfileindex, '("#",a13, 20a16)')'Frequency (eV)', 'Re[\sigma_yz]', 'Im[\sigma_yz]', 'Re[\sigma_zx]', &
-        'Im[\sigma_zx]', 'Re[\sigma_xy]', 'Im[\sigma_xy]'
-        do ifreq=1, FreqNum
+        write(outfileindex, '("#",a16, 20a16)') 'Frequency (eV)', 'Re[\sigma_yz]', 'Im[\sigma_yz]', 'Re[\sigma_zx]', &
+            'Im[\sigma_zx]', 'Re[\sigma_xy]', 'Im[\sigma_xy]'
+        do ifreq = 1, FreqNum
             do index = 1, 3
                 i = alpha_A(index)
                 j = beta_A(index)
                 sigma_A(index*2-1) = real(0.5_dp*(sigma_kubo_AH(i, j, ifreq) - sigma_kubo_AH(j, i, ifreq)), dp)
-                sigma_A(index*2)   = aimag(0.5_dp*(sigma_kubo_H(i, j, ifreq) - sigma_kubo_H(j, i, ifreq)))
-            enddo
+                sigma_A(index*2) = aimag(0.5_dp*(sigma_kubo_H(i, j, ifreq) - sigma_kubo_H(j, i, ifreq)))
+            end do
             write(outfileindex, '(200E16.8)') real(Freq_array(ifreq), dp)/eV2Hartree, sigma_A
-        enddo ! ie
+        end do
         close(outfileindex)
     endif
 
@@ -257,10 +228,11 @@ subroutine bulk_photovoltaic
    !>              [2] Quantum Front 2, 6 (2023)                      !
    !------------------------------------------------------------------!
 
-    integer :: ik, ikx, iky, ikz, knv3, ifreq, i, j, a, b, c, m, n, index, ierr
+    integer :: ik, ikx, iky, ikz, knv3, ifreq, i, a, b, c, m, n, ierr
 
     real(dp) :: k(3), time_start, time_end, xplus, xminus
-    complex(dp) :: cmplx_i, cmplx_1, cmplx_0, omega
+    real(dp) :: k_weight, degen_tol, shift_scale, inject_scale
+    complex(dp) :: cmplx_i, cmplx_0, omega
 
     complex(dp), allocatable :: Freq_array(:)
 
@@ -300,23 +272,14 @@ subroutine bulk_photovoltaic
     !> delta function
     real(dp), external :: delta
 
-    !> Re(sigma_S_xx), Im(sigma_S_xx), Re(sigma_S_yy), Im(sigma_S_yy), ...
-    !> Re(sigma_A_yz), Im(sigma_A_yz), Re(sigma_A_zx), Im(sigma_A_zx), ...
-    real(dp) :: sigma_S(12), sigma_A(6)
-    integer :: alpha_S(6), beta_S(6), alpha_A(3), beta_A(3)
+    integer :: alpha_S(6), beta_S(6)
 
-    !> 1 <--> xx
-    !> 2 <--> xy
-    !> 3 <--> xz
-    !> 4 <--> yy
-    !> 5 <--> yz
-    !> 6 <--> zz
     alpha_S = (/1, 1, 1, 2, 2, 3/)
     beta_S = (/1, 2, 3, 2, 3, 3/)
 
     cmplx_i = (0.0d0, 1.0d0)
-    cmplx_1 = (1.0d0, 0.0d0)
     cmplx_0 = (0.0d0, 0.0d0)
+    degen_tol = eps6
 
     allocate( W (Num_wann))
     allocate( Hamk_bulk(Num_wann, Num_wann))
@@ -395,27 +358,15 @@ subroutine bulk_photovoltaic
             if (W(m) < 0.0_dp) occ(m) = 1.0_dp
         end do
         
-        !> get velocity operator in Hamiltonian basis
-        ! call dHdk_atomicgauge_Ham(k, UU, V_Ham)
-        dHdk = cmplx_0
-        ! call dHdk_latticegauge_wann(k, dHdk)
-        ! call dHdk_latticegauge_Ham2(UU, dHdk, V_Ham)
         call dHdk_atomicgauge_Ham(k, UU, V_Ham)
-        call get_Dmn_Ham(W, V_Ham, D_Ham)
-        !> here we use TBA approximation 
+        call get_Dmn_Ham_safe(W, V_Ham, degen_tol, D_Ham)
         AA = cmplx_i*D_Ham
 
-        !> get d^2H/dk^2 
         dHdkdk = cmplx_0
         Wmn_ham = cmplx_0
-        ! call dHdkdk_latticegauge_wann(k, dHdkdk)
-        ! !> eq(29c)
-        ! call dHdkdk_latticegauge_Ham(UU, dHdkdk, Wmn_Ham)
-
-        call d2Hdk2_atomicgauge_wann(k, dHdkdk) 
+        call d2Hdk2_atomicgauge_wann(k, dHdkdk)
         call d2Hdk2_atomicgauge_Ham(UU, dHdkdk, Wmn_ham)
-
-        call generalderivative(W, V_Ham, D_Ham, Wmn_Ham, gen_der_r)
+        call generalderivative(W, V_Ham, D_Ham, Wmn_Ham, degen_tol, gen_der_r)
 
         do ifreq = 1, FreqNum
             omega = Freq_array(ifreq)
@@ -464,63 +415,41 @@ subroutine bulk_photovoltaic
     cinjectcur = cinjectcur_mpi
 #endif
 
-   ! ------------------------------------------------------------------------
-   ! At this point 
-   ! 
-   ! lshiftcur = Image( N * V_c * int [dk /(2pi)^3] (sum_{m,n}) 
-   !                   *  (f_m - f_n)
-   !                   * [ (r^{c}_{mn})_{k^{a}} * r^{b}_{mn} + (r^{c}_{nm})_{k^{a}} * r^{b}_{mn} ]
-   !                   * [ delta( omega_{mn}) - omega ) + delta( omega_{mn}) + omega ) ] )
-   !
-   ! cshiftcur =  Real( N * V_c * int [dk /(2pi)^3] (sum_{m,n}) 
-   !                   *  (f_m - f_n)
-   !                   * [ (r^{c}_{mn})_{k^{a}} * r^{b}_{mn} - (r^{c}_{nm})_{k^{a}} * r^{b}_{mn} ]
-   !                   * [ delta( omega_{mn}) - omega ) + delta( omega_{mn}) + omega ) ] )
-   !
-   ! linjectcur = Real( N * V_c * int [dk /(2pi)^3] (sum_{m,n}) 
-   !                   *  (f_m - f_n)
-   !                   * [ V_ham(m, m, a) - V_ham(n, n, a) ]
-   !                   * [ (r^{c}_{mn})_{k^{a}} * r^{b}_{mn} + (r^{c}_{nm})_{k^{a}} * r^{b}_{mn} ]
-   !                   * [ delta( omega_{mn}) - omega ) ] )
-   !
-   ! cinjectcur = Image( N * V_c * int [dk /(2pi)^3] (sum_{m,n})
-   !                    *  (f_m - f_n)
-   !                    * [ V_ham(m, m, a) - V_ham(n, n, a) ]
-   !                    * [ (r^{c}_{mn})_{k^{a}} * r^{b}_{mn} - (r^{c}_{nm})_{k^{a}} * r^{b}_{mn} ]
-   !                    * [ delta( omega_{mn}) - omega ) ] )
-   !
-   ! (N is the number of kpoints, V_c is the cell volume). We want :
-   !
-   ! LS = [ (e^3 * pi) / (4 * hbar^2) ] * lshiftcur / N * V_c
-   ! CS = [ (e^3 * pi) / (4 * hbar^2) ] * cshiftcur / N * V_c
-   ! LI = [ (e^3 * pi) / (2 * hbar^2) ] * linjectcur / N * V_c
-   ! CI = [ (e^3 * pi) / (2 * hbar^2) ] * cinjectcur / N * V_c
-   !
-   ! --------------------------------------------------------------------
-      
-    !> The calculation inside WannierTools uses atomic unit, the outputs are in uA*Ang/V^2
+    !> The internal energy axis is Hartree. For shift current the energy delta
+    !> contributes one factor of the atomic unit of time (Time_atomic = hbar/Eh),
+    !> while injection current uses a current-rate kernel and keeps the extra 1/s.
+    !> All responses below remain 3D bulk-normalized; slab/supercell values
+    !> therefore depend on the vacuum thickness.
+    k_weight = kCubeVolume / Origin_cell%ReciprocalCellVolume / dble(knv3)
+    lshiftcur = lshiftcur * k_weight
+    cshiftcur = cshiftcur * k_weight
+    linjectcur = linjectcur * k_weight
+    cinjectcur = cinjectcur * k_weight
 
-    !> The unit of shift current / inject current in atomic units is converted to uA*Ang/V² by:
-    !>  - 6.582119e-16(hbar_eV): converts for delta function
-    !>  - pi*e/(4 hbar**2 V): from nonlinear shift current formula
-    !>  - pi*e/(2 hbar**2 V): from nonlinear shift current formula
-    !>  - 1/100: empirical scaling to match uA scale
+    shift_scale = Time_atomic * pi * Echarge**3 / (4d0*hbar**2*Origin_cell%CellVolume)
+    inject_scale = pi * Echarge**3 / (2d0*hbar**2*Origin_cell%CellVolume)
 
-    lshiftcur = lshiftcur * hbar_eV * pi *Echarge**3 / (4*hbar**2*Origin_cell%CellVolume) / 100
+    lshiftcur = lshiftcur * shift_scale
+    cshiftcur = cshiftcur * shift_scale
+    linjectcur = linjectcur * inject_scale
+    cinjectcur = cinjectcur * inject_scale
 
-    cshiftcur = cshiftcur * hbar_eV * pi *Echarge**3 / (4*hbar**2*Origin_cell%CellVolume) / 100
-
-    linjectcur = linjectcur * hbar_eV * pi *Echarge**3 / (2*hbar**2*Origin_cell%CellVolume) / 100
-
-    cinjectcur = cinjectcur * hbar_eV * pi *Echarge**3 / (2*hbar**2*Origin_cell%CellVolume) / 100
+    call validate_real_tensor_3d('lshiftcur', lshiftcur, 3, 6, FreqNum)
+    call validate_real_tensor_3d('cshiftcur', cshiftcur, 3, 6, FreqNum)
+    call validate_real_tensor_3d('linjectcur', linjectcur, 3, 6, FreqNum)
+    call validate_real_tensor_3d('cinjectcur', cinjectcur, 3, 6, FreqNum)
 
 
     if (cpuid.eq.0) then
         outfileindex= outfileindex+ 1
         open(unit=outfileindex, file='linear_shift.dat')
-        write(outfileindex, '("#",10a)')' the linear shift conductivity in uA*Ang/V^2'
+        write(outfileindex, '("#",a)') 'Linear shift current coefficient in A/V^2'
+        write(outfileindex, '("#",a)') 'Interband only; diagonal TBA; 0 K step occupation; 3D bulk normalization'
+        write(outfileindex, '("#",a)') 'For slab/supercell models this bulk response depends on the vacuum thickness'
+        write(outfileindex, '("#",a)') 'No off-diagonal position matrix elements or degenerate-subspace treatment are included'
+        write(outfileindex, '("#",a)') 'Near true degeneracies or strong near-degeneracies the BPVE can remain gauge/mesh sensitive'
         write(outfileindex, "('#column', i5, 3000i16)")(i, i=1, 19)
-        write(outfileindex, '("#",a13, 20a16)')'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
+        write(outfileindex, '("#",a16, 20a16)')'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
                                                 'yxx', 'yxy', 'yxz', 'yyy', 'yyz', 'yzz', 'zxx', 'zxy', 'zxz', &
                                                 'zyy', 'zyz', 'zzz'
         do ifreq=1, FreqNum
@@ -531,9 +460,13 @@ subroutine bulk_photovoltaic
 
         outfileindex= outfileindex+ 1
         open(unit=outfileindex, file='circular_shift.dat')
-        write(outfileindex, '("#",10a)')' the circular shift conductivity in uA*Ang/V^2'
+        write(outfileindex, '("#",a)') 'Circular shift current coefficient in A/V^2'
+        write(outfileindex, '("#",a)') 'Interband only; diagonal TBA; 0 K step occupation; 3D bulk normalization'
+        write(outfileindex, '("#",a)') 'For slab/supercell models this bulk response depends on the vacuum thickness'
+        write(outfileindex, '("#",a)') 'No off-diagonal position matrix elements or degenerate-subspace treatment are included'
+        write(outfileindex, '("#",a)') 'Near true degeneracies or strong near-degeneracies the BPVE can remain gauge/mesh sensitive'
         write(outfileindex, "('#column', i5, 3000i16)")(i, i=1, 19)
-        write(outfileindex, '("#",a13, 20a16)')'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
+        write(outfileindex, '("#",a16, 20a16)')'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
                                                 'yxx', 'yxy', 'yxz', 'yyy', 'yyz', 'yzz', 'zxx', 'zxy', 'zxz', &
                                                 'zyy', 'zyz', 'zzz'
         do ifreq=1, FreqNum
@@ -543,10 +476,15 @@ subroutine bulk_photovoltaic
         close(outfileindex)
 
         outfileindex= outfileindex+ 1
-        open(unit=outfileindex, file='circular_inject.dat')
-        write(outfileindex, '("#",10a)')' the circular inject conductivity in uA*Ang/V^2'
+        open(unit=outfileindex, file='circular_inject_rate.dat')
+        write(outfileindex, '("#",a)') 'Circular injection current rate in A/(V^2 s)'
+        write(outfileindex, '("#",a)') 'Interband only; diagonal TBA; 0 K step occupation; 3D bulk normalization'
+        write(outfileindex, '("#",a)') 'No relaxation-time factor is included; multiply by a model-specific tau for a steady-state estimate'
+        write(outfileindex, '("#",a)') 'For slab/supercell models this bulk response depends on the vacuum thickness'
+        write(outfileindex, '("#",a)') 'No off-diagonal position matrix elements or degenerate-subspace treatment are included'
+        write(outfileindex, '("#",a)') 'Near true degeneracies or strong near-degeneracies the BPVE can remain gauge/mesh sensitive'
         write(outfileindex, "('#column', i5, 3000i16)")(i, i=1, 19)
-        write(outfileindex, '("#",a13, 20a16)')'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
+        write(outfileindex, '("#",a16, 20a16)') 'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
                                                 'yxx', 'yxy', 'yxz', 'yyy', 'yyz', 'yzz', 'zxx', 'zxy', 'zxz', &
                                                 'zyy', 'zyz', 'zzz'
         do ifreq=1, FreqNum
@@ -556,10 +494,15 @@ subroutine bulk_photovoltaic
         close(outfileindex)
 
         outfileindex= outfileindex+ 1
-        open(unit=outfileindex, file='linear_inject.dat')
-        write(outfileindex, '("#",10a)')' the circular inject conductivity in uA*Ang/V^2'
+        open(unit=outfileindex, file='linear_inject_rate.dat')
+        write(outfileindex, '("#",a)') 'Linear injection current rate in A/(V^2 s)'
+        write(outfileindex, '("#",a)') 'Interband only; diagonal TBA; 0 K step occupation; 3D bulk normalization'
+        write(outfileindex, '("#",a)') 'No relaxation-time factor is included; multiply by a model-specific tau for a steady-state estimate'
+        write(outfileindex, '("#",a)') 'For slab/supercell models this bulk response depends on the vacuum thickness'
+        write(outfileindex, '("#",a)') 'No off-diagonal position matrix elements or degenerate-subspace treatment are included'
+        write(outfileindex, '("#",a)') 'Near true degeneracies or strong near-degeneracies the BPVE can remain gauge/mesh sensitive'
         write(outfileindex, "('#column', i5, 3000i16)")(i, i=1, 19)
-        write(outfileindex, '("#",a13, 20a16)')'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
+        write(outfileindex, '("#",a16, 20a16)') 'Frequency (eV)', 'xxx', 'xxy', 'xxz', 'xyy', 'xyz', 'xzz', &
                                                 'yxx', 'yxy', 'yxz', 'yyy', 'yyz', 'yzz', 'zxx', 'zxy', 'zxz', &
                                                 'zyy', 'zyz', 'zzz'
         do ifreq=1, FreqNum
@@ -597,22 +540,25 @@ subroutine bulk_photovoltaic
        write(outfileindex, '(a)') 'if (col == 17) component = "zyy"'
        write(outfileindex, '(a)') 'if (col == 18) component = "zyz"'
        write(outfileindex, '(a)') 'if (col == 19) component = "zzz"'
-    
+
        write(outfileindex, '(a)') ''
        write(outfileindex, '(a)') 'if (type eq "LS") filename = "linear_shift.dat"'
-       write(outfileindex, '(a)') 'if (type eq "LI") filename = "linear_inject.dat"'
+       write(outfileindex, '(a)') 'if (type eq "LI") filename = "linear_inject_rate.dat"'
        write(outfileindex, '(a)') 'if (type eq "CS") filename = "circular_shift.dat"'
-       write(outfileindex, '(a)') 'if (type eq "CI") filename = "circular_inject.dat"'
-    
+        write(outfileindex, '(a)') 'if (type eq "CI") filename = "circular_inject_rate.dat"'
+
        write(outfileindex, '(a)') ''
        write(outfileindex, '(a)') 'outfile = sprintf("sigma_%s_%s.pdf", type, component)'
        write(outfileindex, '(a)') ''
        write(outfileindex, '(a)') 'set terminal pdfcairo enhanced font "Arial,30" size 6,6'
        write(outfileindex, '(a)') 'set output outfile'
        write(outfileindex, '(a)') ''
-       write(outfileindex, '(a)') 'set title sprintf("BPVE Conductivity (sigma-%s-%s)", type, component)'
+       write(outfileindex, '(a)') 'ylabel = "Response"'
+       write(outfileindex, '(a)') 'if (type eq "LS" || type eq "CS") ylabel = "Shift coefficient (A/V^{2})"'
+       write(outfileindex, '(a)') 'if (type eq "LI" || type eq "CI") ylabel = "Injection rate (A/V^{2}/s)"'
+       write(outfileindex, '(a)') 'set title sprintf("BPVE Response (%s-%s)", type, component)'
        write(outfileindex, '(a)') 'set xlabel "Frequency (eV)"'
-       write(outfileindex, '(a)') 'set ylabel "Conductivity (Ang {/Symbol m}A/V^{2})'
+       write(outfileindex, '(a)') 'set ylabel ylabel'
        write(outfileindex, '(a)') 'set grid'
        write(outfileindex, '(a)') ''
        write(outfileindex, '(a)') 'plot filename using 1:col title component with lines lw 5'
@@ -625,40 +571,122 @@ subroutine bulk_photovoltaic
 
 end subroutine bulk_photovoltaic
 
-subroutine generalderivative(W, V_Ham, D_Ham,  Wmn_Ham, gen_der_r)
-    use para, only :Num_wann, zi, pi2zi, dp, stdout
-    use wmpi
+subroutine get_Dmn_Ham_safe(W, velocity_Ham, degen_tol, Dmn_Ham)
+    use para, only : dp, Num_wann, zzero
+    implicit none
+
+    real(dp), intent(in) :: W(Num_wann)
+    complex(dp), intent(in) :: velocity_Ham(Num_wann, Num_wann, 3)
+    real(dp), intent(in) :: degen_tol
+    complex(dp), intent(out) :: Dmn_Ham(Num_wann, Num_wann, 3)
+
+    integer :: m, n, i
+
+    Dmn_Ham = zzero
+    do i = 1, 3
+        do n = 1, Num_wann
+            do m = 1, Num_wann
+                if (m == n) cycle
+                if (abs(W(n)-W(m)) <= degen_tol) cycle
+                Dmn_Ham(m, n, i) = velocity_Ham(m, n, i)/(W(n)-W(m))
+            end do
+        end do
+    end do
+end subroutine get_Dmn_Ham_safe
+
+subroutine validate_complex_tensor_3d(label, tensor, n1, n2, n3)
+    use para, only : dp, stdout
+    use wmpi, only : cpuid
+    implicit none
+
+    character(*), intent(in) :: label
+    integer, intent(in) :: n1, n2, n3
+    complex(dp), intent(in) :: tensor(n1, n2, n3)
+
+    integer :: i1, i2, i3
+    real(dp) :: re_part, im_part
+
+    do i3 = 1, n3
+        do i2 = 1, n2
+            do i1 = 1, n1
+                re_part = real(tensor(i1, i2, i3), dp)
+                im_part = aimag(tensor(i1, i2, i3))
+                if ((re_part /= re_part) .or. (im_part /= im_part)) then
+                    if (cpuid.eq.0) write(stdout, '(a, 3i6)') 'ERROR: NaN detected in '//trim(label)//' at', i1, i2, i3
+                    stop 1
+                endif
+                if (abs(re_part) > huge(re_part) .or. abs(im_part) > huge(im_part)) then
+                    if (cpuid.eq.0) write(stdout, '(a, 3i6)') 'ERROR: Inf detected in '//trim(label)//' at', i1, i2, i3
+                    stop 1
+                endif
+            end do
+        end do
+    end do
+end subroutine validate_complex_tensor_3d
+
+subroutine validate_real_tensor_3d(label, tensor, n1, n2, n3)
+    use para, only : dp, stdout
+    use wmpi, only : cpuid
+    implicit none
+
+    character(*), intent(in) :: label
+    integer, intent(in) :: n1, n2, n3
+    real(dp), intent(in) :: tensor(n1, n2, n3)
+
+    integer :: i1, i2, i3
+
+    do i3 = 1, n3
+        do i2 = 1, n2
+            do i1 = 1, n1
+                if (tensor(i1, i2, i3) /= tensor(i1, i2, i3)) then
+                    if (cpuid.eq.0) write(stdout, '(a, 3i6)') 'ERROR: NaN detected in '//trim(label)//' at', i1, i2, i3
+                    stop 1
+                endif
+                if (abs(tensor(i1, i2, i3)) > huge(tensor(i1, i2, i3))) then
+                    if (cpuid.eq.0) write(stdout, '(a, 3i6)') 'ERROR: Inf detected in '//trim(label)//' at', i1, i2, i3
+                    stop 1
+                endif
+            end do
+        end do
+    end do
+end subroutine validate_real_tensor_3d
+
+subroutine generalderivative(W, V_Ham, D_Ham, Wmn_Ham, degen_tol, gen_der_r)
+    use para, only : Num_wann, dp, zzero
     implicit none
 
     real(dp), intent(in) :: W(Num_wann)
     complex(dp), intent(in) :: V_Ham(Num_wann, Num_wann, 3)
     complex(dp), intent(in) :: D_Ham(Num_wann, Num_wann, 3)
     complex(dp), intent(in) :: Wmn_Ham(Num_wann, Num_wann, 3, 3)
+    real(dp), intent(in) :: degen_tol
     complex(dp), intent(out) :: gen_der_r(Num_wann, Num_wann, 3, 3)
 
     integer :: m, n, i, j, p
-    complex(dp) :: cmplx_i, cmplx_0
+    real(dp) :: delta_nm
+    complex(dp) :: cmplx_i
 
     cmplx_i = (0.0d0, 1.0d0)
-    cmplx_0 = (0.0d0, 0.0d0)
-    gen_der_r = cmplx_0
-    do m = 1, num_wann
-        do n = 1, num_wann
-            ! if (n == m) cycle
+    gen_der_r = zzero
+    do m = 1, Num_wann
+        do n = 1, Num_wann
+            if (n == m) cycle
+            delta_nm = W(n) - W(m)
+            if (abs(delta_nm) <= degen_tol) cycle
             do i = 1, 3
                 do j = 1, 3
                     do p = 1, Num_wann
                         if (p == m .or. p == n) cycle
                         gen_der_r(n, m, i, j) = gen_der_r(n, m, i, j) - V_ham(n, p, i)*D_Ham(p, m, j) &
                                                 + D_ham(n, p, j)*V_ham(p, m, i)
-                    enddo
+                    end do
                     gen_der_r(n, m, i, j) = gen_der_r(n, m, i, j) + (V_ham(n, m, i)*(V_ham(n, n, j)-V_ham(m, m, j)) &
-                                                + (V_ham(n, n, i)-V_ham(m, m, i))*V_ham(n, m, j))/(W(n)-W(m)) - Wmn_ham(n, m, i, j)
-                    gen_der_r(n, m, i, j) = cmplx_i*gen_der_r(n, m, i, j)/(W(n)-W(m))
-                enddo
-            enddo
-        enddo
-    enddo
+                                                + (V_ham(n, n, i)-V_ham(m, m, i))*V_ham(n, m, j))/delta_nm - Wmn_ham(n, m, i, j)
+                    gen_der_r(n, m, i, j) = cmplx_i*gen_der_r(n, m, i, j)/delta_nm
+                end do
+            end do
+        end do
+    end do
 end subroutine generalderivative
 
 subroutine energygap
@@ -672,12 +700,9 @@ subroutine energygap
    !>                                                                 !
    !------------------------------------------------------------------!
     
-    integer :: ik, ikx, iky, ikz, knv3, ifreq, i, j, m, n, index, ierr
-
-    real(dp) :: k(3), time_start, time_end, x, fac_H, fac_AH
+    integer :: ik, ikx, iky, ikz, knv3, i, ierr
+    real(dp) :: k(3), time_start, time_end
     real(dp) :: gap_min, VBM_max, CBM_min, indirect_gap
-    complex(dp) :: cmplx_i, cmplx_1, cmplx_0, omega
-
 
     !> eigen value of H
     real(dp), allocatable :: W(:), occ(:)
@@ -686,16 +711,11 @@ subroutine energygap
     complex(dp), allocatable :: Hamk_bulk(:, :)
     complex(dp), allocatable :: UU(:, :)
 
+    knv3 = Nk1*Nk2*Nk3
+
     allocate( W (Num_wann))
     allocate( Hamk_bulk(Num_wann, Num_wann))
     allocate( UU(Num_wann, Num_wann))
-
-
-    W = 0.0_dp
-    Hamk_bulk = cmplx_0
-    UU = cmplx_0
-    knv3= Nk1*Nk2*Nk3
-
     allocate(occ(Num_wann))
     allocate(gap(knv3))
     allocate(CBM(knv3))
@@ -704,7 +724,16 @@ subroutine energygap
     allocate(CBM_mpi(knv3))
     allocate(VBM_mpi(knv3))
 
+    W = 0.0_dp
+    Hamk_bulk = (0.0_dp, 0.0_dp)
+    UU = (0.0_dp, 0.0_dp)
+    occ = 0.0_dp
+    gap = 0.0_dp
+    CBM = 0.0_dp
+    VBM = 0.0_dp
     gap_mpi = 0.0_dp
+    CBM_mpi = 0.0_dp
+    VBM_mpi = 0.0_dp
 
     call now(time_start) 
     do ik= 1+ cpuid, knv3, num_cpu
@@ -773,13 +802,15 @@ subroutine energygap
     endif
 
     if (cpuid .eq. 0) &
-        write(stdout, '(a, E10.3, a)') 'The optical direct gap is ', gap_min/eV2Hartree, ' eV'
+        write(stdout, '(a, E10.3, a)') 'The minimum direct single-particle gap is ', gap_min/eV2Hartree, ' eV'
     
     
     outfileindex= outfileindex+ 1
     if (cpuid.eq.0) then
         open(unit=outfileindex, file='energygap.dat')
-        write(outfileindex, "('#kx   ', 'ky   ', 'kz   ','gap  ')")
+        write(outfileindex, '("#",a)') 'Minimum direct single-particle gap on the sampled k mesh'
+        write(outfileindex, '("#",a)') 'This is a direct single-particle gap only; no optical matrix elements or selection rules are included'
+        write(outfileindex, '("#",a)') 'k_x  k_y  k_z  gap(eV)'
         do ik = 1, knv3
             ikx= (ik-1)/(nk2*nk3)+1
             iky= ((ik-1-(ikx-1)*Nk2*Nk3)/nk3)+1
@@ -787,8 +818,8 @@ subroutine energygap
             k= K3D_start_cube+ K3D_vec1_cube*(ikx-1)/dble(nk1)  &
                 + K3D_vec2_cube*(iky-1)/dble(nk2)  &
                 + K3D_vec3_cube*(ikz-1)/dble(nk3)
-        
-            write(outfileindex, '(3f5.3, E12.3)') k(1), k(2), k(3), gap(ik)
+
+            write(outfileindex, '(3f10.6, 1x, E16.8)') k(1), k(2), k(3), gap(ik)/eV2Hartree
         enddo
         close(outfileindex)
     endif
