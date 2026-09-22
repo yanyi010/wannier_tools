@@ -607,6 +607,8 @@ subroutine readinput
     MR_algo = 'RKF45'
     MR_ODEtol = 1d-10
     MR_QuadTol = 1d-6
+    MR_ExponentMax = 15d0
+    MR_MaxRec = 8192
    BTauMax = 0d0
    Rcut = 999999d0
    Magp= 1
@@ -674,8 +676,16 @@ subroutine readinput
     MR_algo= upper(MR_algo)
     if (MR_algo/='RKF45' .and. MR_algo/='RK4' .and. MR_algo/='ADAPT') then
        write(stdout,*) '>>> WARNING : unknown MR_algo "', trim(MR_algo), &
-            '", fall back to RKF45'
+          '" ; using the legacy RKF45.'
        MR_algo= 'RKF45'
+    endif
+    if (MR_ExponentMax< 1d0) then
+       write(stdout,*) '>>> WARNING : MR_ExponentMax < 1 gives uncontrolled errors; using 15.'
+       MR_ExponentMax= 15d0
+    endif
+    if (MR_MaxRec< 16) then
+       write(stdout,*) '>>> WARNING : MR_MaxRec < 16 is too small; using 16.'
+       MR_MaxRec= 16
     endif
    if (cpuid==0) then
       write(stdout, *) "  "
@@ -702,6 +712,8 @@ subroutine readinput
       write(stdout, '(1x, a, a     )')'MR_algo : ', trim(MR_algo)
       write(stdout, '(1x, a, es16.5)')'MR_ODEtol : ', MR_ODEtol
       write(stdout, '(1x, a, es16.5)')'MR_QuadTol : ', MR_QuadTol
+      write(stdout, '(1x, a, f16.5 )')'MR_ExponentMax : ', MR_ExponentMax
+      write(stdout, '(1x, a, i8    )')'MR_MaxRec : ', MR_MaxRec
       write(stdout, '(1x, a, f16.5)')'BTauMax(Tesla.ps)', BTauMax
       write(stdout, '(1x, a, f16.5)')'Relaxation_Time_Tau (ps)', Relaxation_Time_Tau
       write(stdout, '(1x, a, f16.5)')'Rcut', Rcut

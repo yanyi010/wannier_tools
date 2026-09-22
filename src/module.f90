@@ -584,6 +584,13 @@
       real(dp) :: MR_ODEtol
       !> target relative tolerance of the panel quadrature (MR_algo='ADAPT')
       real(dp) :: MR_QuadTol
+      !> truncated upper limit of the exponent b/BTau domain, in units of
+      !> BTau (the legacy default equals 'exponent_max' = 15). The omitted
+      !> tail of every orbit average is bounded by exp(-MR_ExponentMax).
+      real(dp) :: MR_ExponentMax
+      !> safety cap on DOPRI5 records per orbit (MR_algo='ADAPT'); orbits
+      !> needing more records are skipped exactly like legacy failures.
+      integer :: MR_MaxRec
 
       real(dp) :: symprec= 1E-4
 
@@ -643,7 +650,7 @@
      namelist /PARAMETERS/ E_arc, Fermi_broadening, EF_integral_range, OmegaNum, OmegaNum_unfold, OmegaMin, OmegaMax, &
         Eta_Arc, iso_energy, Nk1, Nk2, Nk3, NP, Gap_threshold, Tmin, Tmax, NumT, &
          NBTau, BTauNum, BTauMax, Rcut, Magp, Magq, Magp_min, Magp_max, Nslice_BTau_Max, &
-         MR_algo, MR_ODEtol, MR_QuadTol, &
+         MR_algo, MR_ODEtol, MR_QuadTol, MR_ExponentMax, MR_MaxRec, &
         wcc_neighbour_tol, wcc_calc_tol, Beta,NumLCZVecs, iprint_level, &
         Relaxation_Time_Tau,  symprec, arpack_solver, RKF45_PERIODIC_LEVEL, &
         NumRandomConfs, NumSelectedEigenVals, projection_weight_mode, topsurface_atom_index, &

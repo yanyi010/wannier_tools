@@ -165,8 +165,11 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       !> contained subroutines below. The legacy RKF45 path stays untouched
       !> as the default and as the fallback.
       logical :: mr_active
-      integer :: mr_mchunk, mr_lwork, mr_maxrec
+      integer :: mr_mchunk, mr_lwork, mr_reccap
+      !> RK4 grid limit after MR_ExponentMax truncation (legacy : NSlice_Btau)
+      integer :: mr_nsl_tr
       integer :: mr_neval, mr_nfail, mr_nconst, mr_nclosed, mr_nfrozen, mr_nopen
+      real(dp) :: mr_tphase, mr_tzgemm, mr_teig, mr_tred, mr_tmisc
       real(dp), allocatable :: mr_c2f(:, :)      ! cartesian -> fractional matrix
       complex(dp), allocatable :: mr_Phi(:, :)   ! (Nrpts, mchunk) phases
       complex(dp), allocatable :: mr_Pz(:, :)    ! (mchunk, Nrpts) i*phase
@@ -595,6 +598,9 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       time_start= 0d0
       time_end  = 0d0
 
+      !> fast MR engines : one cross-band pass over all orbits of this rank
+      if (mr_active) call mr_fast_driver
+
       do iband= 1, Nband_Fermi_Level
          call now(time_start0)
       
@@ -870,9 +876,8 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       subroutine cal_sigma_iband_k
 
          if (mr_active) then
-            !> fast MR engines (MR_algo='RK4' or 'ADAPT'); the legacy loop
-            !> below remains the default (MR_algo='RKF45') and the fallback
-            call mr_fast_driver
+            !> fast MR engines ran once for all bands in mr_fast_driver;
+            !> the legacy loop below remains the RKF45 default and fallback
             return
          endif
 
@@ -1183,8 +1188,9 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
          complex(dp), allocatable :: qscratch(:, :)
 
          mr_active= .false.
-         mr_maxrec= 32768
+         mr_reccap= max(16, MR_MaxRec)
          mr_neval= 0
+         mr_tphase= 0d0; mr_tzgemm= 0d0; mr_teig= 0d0; mr_tred= 0d0; mr_tmisc= 0d0
          mr_nfail= 0
          mr_nconst= 0
          mr_nclosed= 0
@@ -1213,7 +1219,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
 
          !> batch size from a ~160 MB budget for the (Num_wann^2, M) buffers
          memmb= 16d0*(2d0*dble(Num_wann)**2+ 3d0*dble(Nrpts))
-         mr_mchunk= max(4, min(256, int(160d6/memmb)))
+         mr_mchunk= max(4, min(512, int(160d6/memmb)))
 
          allocate(mr_Phi(Nrpts, mr_mchunk));    mr_Phi= 0d0
          allocate(mr_Pz(mr_mchunk, Nrpts));     mr_Pz= 0d0
@@ -1269,24 +1275,28 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       end subroutine mr_kernel_init
 
 !==========================================================================
-      subroutine mr_eval_batch(M, iband_g, kb, vb, kdb, Eb)
-         !> batched velocity and dk/db for the M k points kb(:, 1:M) of band
-         !> iband_g; the results replicate velocity_calc_iband + dkdt
-         implicit none
-         integer, intent(in) :: M
-         integer, intent(in) :: iband_g
-         real(dp), intent(in) :: kb(:, :)
-         real(dp), intent(out) :: vb(:, :)
-         real(dp), intent(out) :: kdb(:, :)
-         real(dp), intent(out) :: Eb(:)
+       subroutine mr_eval_batch(M, ibands, kb, vb, kdb, Eb)
+          !> batched velocity and dk/db for the M k points kb(:, 1:M); the
+         !> band of point im is ibands(im) (global index), so points from
+         !> different bands can share one batch : the zgemms are band
+          !> independent, only the per-point zheevx selection uses the band.
+          !> the results replicate velocity_calc_iband + dkdt
+          implicit none
+          integer, intent(in) :: M
+          integer, intent(in) :: ibands(M)
+          real(dp), intent(in) :: kb(:, :)
+          real(dp), intent(out) :: vb(:, :)
+          real(dp), intent(out) :: kdb(:, :)
+          real(dp), intent(out) :: Eb(:)
 
          integer :: im, iR, j, a, b, info, mdim, lwork_use
-         real(dp) :: kdotr, phr, phi
+         real(dp) :: kdotr, phr, phi, tmr
          real(dp) :: kdc(3)
          complex(dp) :: cacc
 
          if (M<=0) return
          mr_neval= mr_neval+ M
+         call now(tmr)
 
          !> phases : Phi(iR, im)= exp(2 pi i k_m . R_iR)/ndegen(iR)
          do im= 1, M
@@ -1299,26 +1309,29 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
             enddo
          enddo
 
+         call now(kdotr); mr_tphase= mr_tphase+ (kdotr- tmr); tmr= kdotr
          !> H(k_m)= sum_R H_R Phi_R as one zgemm over the flattened blocks
          call zgemm('N', 'N', Num_wann**2, M, Nrpts, One_complex, HmnR, &
             Num_wann**2, mr_Phi, Nrpts, zzero, mr_Hmat, Num_wann**2)
 
+         call now(kdotr); mr_tzgemm= mr_tzgemm+ (kdotr- tmr); tmr= kdotr
          !> workspace query with the zheevx_pack protocol
          mdim= 1
-         call zheevx('V', 'I', 'U', Num_wann, mr_Hmat(1, 1), Num_wann, 0d0, 0d0, &
-            iband_g, iband_g, 1d-10, mdim, mr_W, mr_U, Num_wann, mr_work, -1, &
-            mr_rwork, mr_iwork, mr_ifail, info)
-         lwork_use= min(int(mr_work(1)), mr_lwork)
+          call zheevx('V', 'I', 'U', Num_wann, mr_Hmat(1, 1), Num_wann, 0d0, 0d0, &
+             ibands(1), ibands(1), 1d-10, mdim, mr_W, mr_U, Num_wann, mr_work, -1, &
+             mr_rwork, mr_iwork, mr_ifail, info)
+          lwork_use= min(int(mr_work(1)), mr_lwork)
 
-         do im= 1, M
-            call zheevx('V', 'I', 'U', Num_wann, mr_Hmat(1, im), Num_wann, 0d0, 0d0, &
-               iband_g, iband_g, 1d-10, mdim, mr_W, mr_U, Num_wann, mr_work, &
-               lwork_use, mr_rwork, mr_iwork, mr_ifail, info)
-            if (info/=0) then
-               write(stdout, '(a, i6, a, i4)') &
-                  '>>> Error info in zheevx (MR fast kernel): ', info, ' at band ', iband_g
-               stop ' Error happens in the MR fast kernel (zheevx)'
-            endif
+          call now(kdotr); mr_teig= mr_teig+ (kdotr- tmr); tmr= kdotr
+          do im= 1, M
+             call zheevx('V', 'I', 'U', Num_wann, mr_Hmat(1, im), Num_wann, 0d0, 0d0, &
+                ibands(im), ibands(im), 1d-10, mdim, mr_W, mr_U, Num_wann, mr_work, &
+                lwork_use, mr_rwork, mr_iwork, mr_ifail, info)
+             if (info/=0) then
+                write(stdout, '(a, i6, a, i4)') &
+                   '>>> Error info in zheevx (MR fast kernel): ', info, ' at band ', ibands(im)
+                stop ' Error happens in the MR fast kernel (zheevx)'
+             endif
             Eb(im)= mr_W(1)
             if (abs(mr_W(1))/eV2Hartree>EF_integral_range) then
                !> legacy : far away from the Fermi level, velocity is zero
@@ -1336,6 +1349,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
             endif
          enddo
 
+         call now(kdotr); mr_tred= mr_tred+ (kdotr- tmr); tmr= kdotr
          !> u^dag H_R u for every R and point
          call zgemm('N', 'N', M, Nrpts, Num_wann**2, One_complex, mr_Aflat, &
             mr_mchunk, HmnR, Num_wann**2, zzero, mr_hR, mr_mchunk)
@@ -1351,6 +1365,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
             enddo
          enddo
 
+         call now(kdotr); mr_tmisc= mr_tmisc+ (kdotr- tmr); tmr= kdotr
          !> dk/db in fractional coordinates, exactly as dkdt
          do im= 1, M
             if (sum(abs(vb(:, im)))<eps3) then
@@ -1364,72 +1379,114 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                enddo
             endif
          enddo
+         call now(kdotr); mr_tmisc= mr_tmisc+ (kdotr- tmr)
          return
       end subroutine mr_eval_batch
 
 !==========================================================================
       subroutine mr_fast_driver
+         !> cross-band fast MR engines : every (band, k) orbit owned by this
+         !> rank is collected into one flat list, so the batched eigensolves
+         !> stay wide even when a single band holds only a few k points here
+         !> (the zgemms are band independent; only the zheevx selection is).
          implicit none
-         integer :: ik, ik0, o, mcount, mch, ibg
+         integer :: ik, ik0, o, mcount, mch, cnt, ntot, ib, ibd
          real(dp) :: tchunk
          real(dp), allocatable :: k0s(:, :), v0s(:, :), kd0s(:, :), E0s(:), Ebs(:)
          real(dp), allocatable :: vs(:, :, :)
          real(dp), allocatable :: recs(:, :, :)
          integer, allocatable :: orbs(:), icyc(:), frz(:), nrec(:)
          real(dp), allocatable :: Bcl(:), Bfz(:)
+         integer, allocatable :: oband(:), oik(:), ibgs(:)
+         real(dp), allocatable :: k0f(:, :), E0f(:), wkf(:)
 
-         ibg= bands_fermi_level(iband)
+         !> truncated RK4 grid limit (legacy when MR_ExponentMax>=exponent_max);
+         !> computed here because exponent_max is only set in the host after
+         !> mr_kernel_init has run
+         if (MR_ExponentMax>= exponent_max) then
+            mr_nsl_tr= NSlice_Btau
+         else
+            mr_nsl_tr= max(2, int(MR_ExponentMax/exponent_max*dble(NSlice_Btau)))
+            if (cpuid==0) write(stdout, '(a, f8.2, a, i8)') &
+               '>> MR fast engine : exponent truncated to ', MR_ExponentMax, &
+               ' , RK4 grid limit ', mr_nsl_tr
+         endif
+
          mch= mr_mchunk
          if (MR_algo=='RK4') then
             mch= min(mch, max(4, int(96d6/(24d0*dble(max(NSlice_Btau, 1))))))
          else
-            mch= min(mch, max(8, int(96d6/(136d0*dble(mr_maxrec)))))
+            mch= min(mch, max(8, int(96d6/(136d0*dble(mr_reccap)))))
          endif
 
+         !> flat cross-band orbit list of this rank
+         ntot= 0
+         do ib= 1, Nband_Fermi_Level
+            ntot= ntot+ max(0, KCube3D_left(ib)%Nk_end- KCube3D_left(ib)%Nk_start+ 1)
+         enddo
+         allocate(oband(max(ntot, 1)), oik(max(ntot, 1)))
+         allocate(k0f(3, max(ntot, 1)), E0f(max(ntot, 1)), wkf(max(ntot, 1)))
+         cnt= 0
+         do ib= 1, Nband_Fermi_Level
+            do ik= KCube3D_left(ib)%Nk_start, KCube3D_left(ib)%Nk_end
+               cnt= cnt+ 1
+               oband(cnt)= ib
+               oik(cnt)= ik
+               k0f(:, cnt)= KCube3D_left(ib)%k_direct(:, ik)
+               E0f(cnt)= KCube3D_left(ib)%Ek_total(ik)
+               wkf(cnt)= KCube3D_left(ib)%weight_k(ik)
+            enddo
+         enddo
+         ntot= cnt
+
          allocate(k0s(3, mch)); allocate(v0s(3, mch)); allocate(kd0s(3, mch))
-         allocate(E0s(mch));    allocate(Ebs(mch))
+         allocate(E0s(mch));    allocate(Ebs(mch));    allocate(ibgs(mch))
          allocate(orbs(mch));   allocate(icyc(mch));  allocate(frz(mch))
          if (MR_algo=='RK4') then
             allocate(vs(3, NSlice_Btau, mch)); vs= 0d0
          else
-            allocate(recs(17, mr_maxrec, mch)); recs= 0d0
+            allocate(recs(17, mr_reccap, mch)); recs= 0d0
             allocate(nrec(mch)); allocate(Bcl(mch)); allocate(Bfz(mch))
          endif
 
-         do ik0= KCube3D_left(iband)%Nk_start, KCube3D_left(iband)%Nk_end, mch
+         do ik0= 1, ntot, mch
             call now(time_start)
-            mcount= min(mch, KCube3D_left(iband)%Nk_end- ik0+ 1)
+            mcount= min(mch, ntot- ik0+ 1)
             do o= 1, mcount
-               ik= ik0+ o- 1
-               k0s(:, o)= KCube3D_left(iband)%k_direct(:, ik)
-               E0s(o)= KCube3D_left(iband)%Ek_total(ik)
+               cnt= ik0+ o- 1
+               k0s(:, o)= k0f(:, cnt)
+               E0s(o)= E0f(cnt)
+               ibgs(o)= bands_fermi_level(oband(cnt))
             enddo
-            call mr_eval_batch(mcount, ibg, k0s, v0s, kd0s, Ebs)
+            call mr_eval_batch(mcount, ibgs, k0s, v0s, kd0s, Ebs)
 
             if (MR_algo=='RK4') then
-               call mr_rk4_engine(mcount, ibg, k0s, v0s, kd0s, orbs, icyc, frz, vs)
+               call mr_rk4_engine(mcount, ibgs, k0s, v0s, kd0s, orbs, icyc, frz, vs)
                do o= 1, mcount
-                  ik= ik0+ o- 1
-                  call mr_accumulate_rk4(E0s(o), KCube3D_left(iband)%weight_k(ik), &
+                  cnt= ik0+ o- 1
+                  call mr_accumulate_rk4(oband(cnt), E0s(o), wkf(cnt), &
                      orbs(o), icyc(o), frz(o), vs(:, :, o))
                enddo
             else
-               call mr_adapt_engine(mcount, ibg, k0s, v0s, kd0s, orbs, Bcl, Bfz, recs, nrec)
+               call mr_adapt_engine(mcount, ibgs, k0s, v0s, kd0s, orbs, Bcl, Bfz, recs, nrec)
                do o= 1, mcount
-                  ik= ik0+ o- 1
-                  call mr_accumulate_adapt(E0s(o), KCube3D_left(iband)%weight_k(ik), v0s(:, o), &
+                  cnt= ik0+ o- 1
+                  call mr_accumulate_adapt(oband(cnt), E0s(o), wkf(cnt), v0s(:, o), &
                      orbs(o), Bcl(o), Bfz(o), recs(:, :, o), nrec(o))
                enddo
             endif
 
             if (cpuid==0) then
                do o= 1, mcount
+                  cnt= ik0+ o- 1
                   if (MR_algo=='RK4') then
-                     write(stdout, '(a, i4, a, 3f9.4, a, i4, a, i7, a, i7)') &
-                        '>> MR orbit : o=', o, ' k0=', k0s(:, o), ' class=', orbs(o), ' icyc=', icyc(o), ' frz=', frz(o)
+                     write(stdout, '(a, i4, a, i4, a, 3f9.4, a, i4, a, i7, a, i7)') &
+                        '>> MR orbit : b=', oband(cnt), ' o=', o, ' k0=', k0s(:, o), &
+                        ' class=', orbs(o), ' icyc=', icyc(o), ' frz=', frz(o)
                   else
-                     write(stdout, '(a, i4, a, 3f9.4, a, i4, a, es10.2, a, es10.2, a, i7)') &
-                        '>> MR orbit : o=', o, ' k0=', k0s(:, o), ' class=', orbs(o), ' Bcl=', Bcl(o), ' Bfz=', Bfz(o), ' nrec=', nrec(o)
+                     write(stdout, '(a, i4, a, i4, a, 3f9.4, a, i4, a, es10.2, a, es10.2, a, i7)') &
+                        '>> MR orbit : b=', oband(cnt), ' o=', o, ' k0=', k0s(:, o), &
+                        ' class=', orbs(o), ' Bcl=', Bcl(o), ' Bfz=', Bfz(o), ' nrec=', nrec(o)
                   endif
                enddo
             endif
@@ -1437,46 +1494,52 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
             call now(time_end)
             tchunk= time_end- time_start
             do o= 1, mcount
-               ik= ik0+ o- 1
-               sigma_iband_k(iband)%time_cost_mpi(ik)= tchunk/dble(mcount)
+               cnt= ik0+ o- 1
+               sigma_iband_k(oband(cnt))%time_cost_mpi(oik(cnt))= tchunk/dble(mcount)
             enddo
             if (cpuid==0) then
-               write(stdout, '(a, i8, a, i8, a, i8, a, f10.3, a)') &
-                  'In sigma_OHE(mr) iband', iband, ' ik from ', ik0, ' to ', ik0+mcount-1, &
+               write(stdout, '(a, i8, a, i8, a, f10.3, a)') &
+                  'In sigma_OHE(mr) orbits ', ik0, ' to ', ik0+mcount-1, &
                   ' time cost', tchunk, ' s'
             endif
          enddo
 
          if (cpuid==0) then
             write(stdout, '(a, i12)') '>> MR fast : batched velocity evaluations so far : ', mr_neval
+            write(stdout, '(a, 5f12.3)') '>> MR fast : t phase/Hgemm/eigws/zheevx+vproj/rest (s) : ', &
+               mr_tphase, mr_tzgemm, mr_teig, mr_tred, mr_tmisc
             write(stdout, '(a, 4i10)') '>> MR fast : open / const / closed / frozen so far : ', &
                mr_nopen, mr_nconst, mr_nclosed, mr_nfrozen
             if (mr_nfail>0) write(stdout, '(a, i8, a)') &
                '>>> WARNING : MR fast engine skipped ', mr_nfail, ' failed orbits (this cpu).'
          endif
 
-         deallocate(k0s, v0s, kd0s, E0s, Ebs, orbs, icyc, frz)
+         deallocate(k0s, v0s, kd0s, E0s, Ebs, ibgs, orbs, icyc, frz)
+         deallocate(oband, oik, k0f, E0f, wkf)
          if (allocated(vs)) deallocate(vs)
          if (allocated(recs)) deallocate(recs, nrec, Bcl, Bfz)
          return
       end subroutine mr_fast_driver
 
 !==========================================================================
-      subroutine mr_rk4_engine(M, iband_g, k0s, v0s, kd0s, orbs, icyc, frz, vs)
-         !> fixed-step RK4 on the legacy Btau grid. Replicates the legacy
-         !> RKF45_pack semantics : grid spacing exponent_max*BTauMax/Nsl,
-         !> freeze checked at every grid arrival (kdot from the arrival
-         !> point), closure for 10 < grid < Nsl against the grid-2 distance.
-         implicit none
-         integer, intent(in) :: M, iband_g
-         real(dp), intent(in) :: k0s(3, M), v0s(3, M), kd0s(3, M)
-         integer, intent(out) :: orbs(M), icyc(M), frz(M)
-         real(dp), intent(out) :: vs(3, NSlice_Btau, M)
+       subroutine mr_rk4_engine(M, ibgs, k0s, v0s, kd0s, orbs, icyc, frz, vs)
+          !> fixed-step RK4 on the legacy Btau grid. Replicates the legacy
+          !> RKF45_pack semantics : grid spacing exponent_max*BTauMax/Nsl,
+          !> freeze checked at every grid arrival (kdot from the arrival
+          !> point), closure for 10 < grid < Nsl against the grid-2 distance.
+          !> With MR_ExponentMax < exponent_max the march stops early at the
+          !> truncated grid mr_nsl_tr (bounded tail error exp(-MR_ExponentMax)).
+          implicit none
+          integer, intent(in) :: M
+          integer, intent(in) :: ibgs(M)
+          real(dp), intent(in) :: k0s(3, M), v0s(3, M), kd0s(3, M)
+          integer, intent(out) :: orbs(M), icyc(M), frz(M)
+          real(dp), intent(out) :: vs(3, NSlice_Btau, M)
 
-         integer, parameter :: ST_OPEN=1, ST_CONST=2, ST_CLOSED=3, ST_FRZ=4
-         integer :: o, im, ia, nact
-         real(dp) :: h, vc(3), kdiff(3)
-         integer :: act(M)
+          integer, parameter :: ST_OPEN=1, ST_CONST=2, ST_CLOSED=3, ST_FRZ=4
+          integer :: o, im, ia, nact
+          real(dp) :: h, vc(3), kdiff(3)
+          integer :: act(M), ibs(M)
          real(dp) :: ycur(3, M), kdc(3, M), dsm(M), kk1(3, M), kk2(3, M)
          real(dp) :: ys(3, M), vst(3, M), kdst(3, M), Est(M)
          real(dp) :: k2(3, M), k3(3, M), k4(3, M)
@@ -1506,33 +1569,38 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
             endif
          enddo
 
-          do im= 2, NSlice_Btau
-             if (nact==0) exit
+           do im= 2, mr_nsl_tr
+              if (nact==0) exit
 
-            !> RK4 step from grid im-1 to grid im (4 batched evaluations)
-            do ia= 1, nact
-               o= act(ia)
-               ys(:, ia)= ycur(:, o)+ 0.5d0*h*kdc(:, o)
-            enddo
-            call mr_eval_batch(nact, iband_g, ys, vst, kdst, Est)
-            do ia= 1, nact
-               o= act(ia)
-               k2(:, ia)= kdst(:, ia)
-               ys(:, ia)= ycur(:, o)+ 0.5d0*h*k2(:, ia)
-            enddo
-            call mr_eval_batch(nact, iband_g, ys, vst, kdst, Est)
-            do ia= 1, nact
-               o= act(ia)
-               k3(:, ia)= kdst(:, ia)
-               ys(:, ia)= ycur(:, o)+ h*k3(:, ia)
-            enddo
-            call mr_eval_batch(nact, iband_g, ys, vst, kdst, Est)
-            do ia= 1, nact
-               o= act(ia)
-               k4(:, ia)= kdst(:, ia)
-               ys(:, ia)= ycur(:, o)+ h/6d0*(kdc(:, o)+ 2d0*k2(:, ia)+ 2d0*k3(:, ia)+ k4(:, ia))
-            enddo
-            call mr_eval_batch(nact, iband_g, ys, vst, kdst, Est)
+             !> per-active-orbit band indices for the batched evaluations
+             do ia= 1, nact
+                ibs(ia)= ibgs(act(ia))
+             enddo
+
+             !> RK4 step from grid im-1 to grid im (4 batched evaluations)
+             do ia= 1, nact
+                o= act(ia)
+                ys(:, ia)= ycur(:, o)+ 0.5d0*h*kdc(:, o)
+             enddo
+             call mr_eval_batch(nact, ibs, ys, vst, kdst, Est)
+             do ia= 1, nact
+                o= act(ia)
+                k2(:, ia)= kdst(:, ia)
+                ys(:, ia)= ycur(:, o)+ 0.5d0*h*k2(:, ia)
+             enddo
+             call mr_eval_batch(nact, ibs, ys, vst, kdst, Est)
+             do ia= 1, nact
+                o= act(ia)
+                k3(:, ia)= kdst(:, ia)
+                ys(:, ia)= ycur(:, o)+ h*k3(:, ia)
+             enddo
+             call mr_eval_batch(nact, ibs, ys, vst, kdst, Est)
+             do ia= 1, nact
+                o= act(ia)
+                k4(:, ia)= kdst(:, ia)
+                ys(:, ia)= ycur(:, o)+ h/6d0*(kdc(:, o)+ 2d0*k2(:, ia)+ 2d0*k3(:, ia)+ k4(:, ia))
+             enddo
+             call mr_eval_batch(nact, ibs, ys, vst, kdst, Est)
             do ia= 1, nact
                o= act(ia)
                vs(:, im, o)= vst(:, ia)
@@ -1564,8 +1632,8 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                 enddo
              endif
 
-            !> legacy exits right after storing the last grid point
-            if (im==NSlice_Btau) exit
+             !> legacy exits right after storing the last grid point
+             if (im==mr_nsl_tr) exit
 
             !> closure for 10 < im <= Nsl-1 (legacy : icycle= it- 1)
             if (im>10) then
@@ -1598,18 +1666,21 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       end subroutine mr_rk4_engine
 
 !==========================================================================
-      subroutine mr_adapt_engine(M, iband_g, k0s, v0s, kd0s, orbs, Bcl, Bfz, recs, nrec)
-         !> adaptive DOPRI5 with dense output (CONTD5). Records 17 doubles
-         !> per accepted step : b, h, c1, c2, c3, c4, c5 for the dense
-         !> polynomial. Termination follows the legacy semantics : freeze
-         !> (checked first), closure beyond 10 grid steps, end of domain.
-         implicit none
-         integer, intent(in) :: M, iband_g
+       subroutine mr_adapt_engine(M, ibgs, k0s, v0s, kd0s, orbs, Bcl, Bfz, recs, nrec)
+          !> adaptive DOPRI5 with dense output (CONTD5). Records 17 doubles
+          !> per accepted step : b, h, c1, c2, c3, c4, c5 for the dense
+          !> polynomial. Termination follows the legacy semantics : freeze
+          !> (checked first), closure beyond 10 grid steps, end of domain.
+          !> With MR_ExponentMax < exponent_max the domain end is truncated
+          !> (bounded tail error exp(-MR_ExponentMax)).
+          implicit none
+          integer, intent(in) :: M
+          integer, intent(in) :: ibgs(M)
          real(dp), intent(in) :: k0s(3, M), v0s(3, M), kd0s(3, M)
          integer, intent(out) :: orbs(M)
          real(dp), intent(out) :: Bcl(M), Bfz(M)
          integer, intent(out) :: nrec(M)
-         real(dp), intent(out) :: recs(17, mr_maxrec, M)
+         real(dp), intent(out) :: recs(17, mr_reccap, M)
 
          integer, parameter :: ST_OPEN=1, ST_CONST=2, ST_CLOSED=3, ST_FRZ=4, ST_FAIL=5
          real(dp), parameter :: C2=0.2d0, C3=0.3d0, C4=0.8d0, C5=8d0/9d0
@@ -1631,7 +1702,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
          integer :: o, ia, i, j, nact
          real(dp) :: rtol, atol, db, b_end, est, sk, err, fac11, fac, hnew, bnw
          real(dp) :: kdiff(3), vc(3)
-         integer :: act(M), natt(M), mgrid(M)
+          integer :: act(M), natt(M), mgrid(M), ibs(M)
          logical :: marching(M), kk2ok(M)
          real(dp) :: ggrid, fgrid, fg1, kdint(3)
          real(dp) :: y(3, M), k1(3, M), bb(M), hh(M), fold(M), dsm(M)
@@ -1640,10 +1711,10 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
          real(dp) :: k2(3, M), k3(3, M), k4(3, M), k5(3, M), k6(3, M), k7(3, M)
          real(dp), external :: norm
 
-         rtol= MR_ODEtol
-         atol= 1d-12
-         db= exponent_max*BTauMax/NSlice_Btau
-         b_end= -exponent_max*BTauMax
+          rtol= MR_ODEtol
+          atol= 1d-12
+          db= exponent_max*BTauMax/NSlice_Btau
+          b_end= -min(exponent_max, MR_ExponentMax)*BTauMax
 
          !> grid-1 classification, identical to mr_rk4_engine
          nact= 0
@@ -1684,40 +1755,45 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
             return
          endif
 
-         do while (nact>0)
-            !> clip the steps to the domain end
-            do ia= 1, nact
-               o= act(ia)
-               if (bb(o)+ hh(o)<=b_end) hh(o)= b_end- bb(o)
-            enddo
+          do while (nact>0)
+             !> clip the steps to the domain end
+             do ia= 1, nact
+                o= act(ia)
+                if (bb(o)+ hh(o)<=b_end) hh(o)= b_end- bb(o)
+             enddo
 
-            !> DOPRI5 stages 2..6
-            do ia= 1, nact
-               o= act(ia)
-               yA(:, ia)= y(:, o)+ hh(o)*C2*k1(:, o)
-            enddo
-            call mr_eval_batch(nact, iband_g, yA, vA, k2, EA)
-            do ia= 1, nact
-               o= act(ia)
-               yA(:, ia)= y(:, o)+ hh(o)*(A31*k1(:, o)+ A32*k2(:, ia))
-            enddo
-            call mr_eval_batch(nact, iband_g, yA, vA, k3, EA)
-            do ia= 1, nact
-               o= act(ia)
-               yA(:, ia)= y(:, o)+ hh(o)*(A41*k1(:, o)+ A42*k2(:, ia)+ A43*k3(:, ia))
-            enddo
-            call mr_eval_batch(nact, iband_g, yA, vA, k4, EA)
-            do ia= 1, nact
-               o= act(ia)
-               yA(:, ia)= y(:, o)+ hh(o)*(A51*k1(:, o)+ A52*k2(:, ia)+ A53*k3(:, ia)+ A54*k4(:, ia))
-            enddo
-            call mr_eval_batch(nact, iband_g, yA, vA, k5, EA)
-            do ia= 1, nact
-               o= act(ia)
-               yA(:, ia)= y(:, o)+ hh(o)*(A61*k1(:, o)+ A62*k2(:, ia)+ A63*k3(:, ia) &
-                  + A64*k4(:, ia)+ A65*k5(:, ia))
-            enddo
-            call mr_eval_batch(nact, iband_g, yA, vA, k6, EA)
+             !> per-active-orbit band indices for the batched evaluations
+             do ia= 1, nact
+                ibs(ia)= ibgs(act(ia))
+             enddo
+
+             !> DOPRI5 stages 2..6
+             do ia= 1, nact
+                o= act(ia)
+                yA(:, ia)= y(:, o)+ hh(o)*C2*k1(:, o)
+             enddo
+             call mr_eval_batch(nact, ibs, yA, vA, k2, EA)
+             do ia= 1, nact
+                o= act(ia)
+                yA(:, ia)= y(:, o)+ hh(o)*(A31*k1(:, o)+ A32*k2(:, ia))
+             enddo
+             call mr_eval_batch(nact, ibs, yA, vA, k3, EA)
+             do ia= 1, nact
+                o= act(ia)
+                yA(:, ia)= y(:, o)+ hh(o)*(A41*k1(:, o)+ A42*k2(:, ia)+ A43*k3(:, ia))
+             enddo
+             call mr_eval_batch(nact, ibs, yA, vA, k4, EA)
+             do ia= 1, nact
+                o= act(ia)
+                yA(:, ia)= y(:, o)+ hh(o)*(A51*k1(:, o)+ A52*k2(:, ia)+ A53*k3(:, ia)+ A54*k4(:, ia))
+             enddo
+             call mr_eval_batch(nact, ibs, yA, vA, k5, EA)
+             do ia= 1, nact
+                o= act(ia)
+                yA(:, ia)= y(:, o)+ hh(o)*(A61*k1(:, o)+ A62*k2(:, ia)+ A63*k3(:, ia) &
+                   + A64*k4(:, ia)+ A65*k5(:, ia))
+             enddo
+             call mr_eval_batch(nact, ibs, yA, vA, k6, EA)
 
             !> 5th-order solution and the FSAL derivative at y5
             do ia= 1, nact
@@ -1725,7 +1801,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                y5(:, ia)= y(:, o)+ hh(o)*(A71*k1(:, o)+ A73*k3(:, ia)+ A74*k4(:, ia) &
                   + A75*k5(:, ia)+ A76*k6(:, ia))
             enddo
-            call mr_eval_batch(nact, iband_g, y5, vA, k7, EA)
+             call mr_eval_batch(nact, ibs, y5, vA, k7, EA)
 
             !> error estimation and step control
             do ia= 1, nact
@@ -1743,7 +1819,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                fac= max(1d0/FAC2, min(1d0/FAC1, fac/SAFE))
                hnew= hh(o)/fac
                natt(o)= natt(o)+ 1
-               if (natt(o)>2*mr_maxrec) then
+               if (natt(o)>2*mr_reccap) then
                   orbs(o)= ST_FAIL
                   marching(o)= .false.
                   mr_nfail= mr_nfail+ 1
@@ -1753,7 +1829,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                if (err<=1d0) then
                   !> accept : store the dense-output coefficients
                   j= nrec(o)+ 1
-                  if (j>mr_maxrec) then
+                  if (j>mr_reccap) then
                      orbs(o)= ST_FAIL
                      marching(o)= .false.
                      mr_nfail= mr_nfail+ 1
@@ -1942,26 +2018,33 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       end subroutine mr_symm_dyad
 
 !==========================================================================
-      subroutine mr_accumulate_rk4(EE, wtk, iorb, icyc_o, frz_o, vsr)
-         !> legacy Boole accumulation, verbatim (weights 28/64/24/64 over 45,
-         !> endpoint correction -14/45, exponential factors, Nslice mapping)
-         implicit none
-         real(dp), intent(in) :: EE, wtk
-         integer, intent(in) :: iorb, icyc_o, frz_o
-         real(dp), intent(in) :: vsr(:, :)
+       subroutine mr_accumulate_rk4(ibd, EE, wtk, iorb, icyc_o, frz_o, vsr)
+          !> legacy Boole accumulation, verbatim (weights 28/64/24/64 over 45,
+          !> endpoint correction -14/45, exponential factors, Nslice mapping)
+          implicit none
+          integer, intent(in) :: ibd
+          real(dp), intent(in) :: EE, wtk
+          integer, intent(in) :: iorb, icyc_o, frz_o
+          real(dp), intent(in) :: vsr(:, :)
 
-         integer, parameter :: ST_OPEN=1, ST_CONST=2, ST_CLOSED=3, ST_FRZ=4
-         integer :: eff, Nlocal, it, ibtau, ie, ikt
-         real(dp) :: BTau, KBT, mu, minusdfde, DeltaBtau
-         real(dp) :: vk(3), vbar(3), sigt(9)
+          integer, parameter :: ST_OPEN=1, ST_CONST=2, ST_CLOSED=3, ST_FRZ=4
+          integer :: eff, Nlocal, it, ibtau, ie, ikt
+          real(dp) :: BTau, KBT, mu, minusdfde, DeltaBtau, dexp
+          real(dp) :: vk(3), vbar(3), sigt(9)
 
-         if (iorb==ST_CONST) then
-            eff= 1
-         elseif (iorb==ST_FRZ) then
-            eff= frz_o
-         else
-            eff= NSlice_Btau
-         endif
+          if (iorb==ST_CONST) then
+             eff= 1
+          elseif (iorb==ST_FRZ) then
+             eff= frz_o
+          else
+             eff= mr_nsl_tr
+          endif
+          !> the Boole weights always span [0, exponent_max] in units of the
+          !> relaxation time; a truncated open orbit spans only
+          !> [0, MR_ExponentMax], so its weight domain must shrink with it
+          !> (frozen/closed orbits keep the legacy convention untouched)
+          dexp= exponent_max
+          if (iorb==ST_OPEN) dexp= min(exponent_max, MR_ExponentMax)
 
          do ikt= 1, NumT
             KBT= KBT_array(ikt)
@@ -1978,7 +2061,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                   endif
                   vk= vsr(:, 1)
                   if (BTau>eps3 .and. Nlocal>1) then
-                     DeltaBtau= exponent_max/Nlocal
+                     DeltaBtau= dexp/Nlocal
                      vbar= 0d0
                      do it= 1, Nlocal, 4
                         vbar= vbar+ 28.0d0/45.0d0*DeltaBtau*exp(-(it-1d0)*DeltaBtau)*vsr(:, it)
@@ -1997,8 +2080,8 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                      vbar= vk
                   endif
                   call mr_symm_dyad(vk, vbar, sigt)
-                  sigma_iband_k(iband)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)= &
-                     sigma_iband_k(iband)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)+ &
+                  sigma_iband_k(ibd)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)= &
+                     sigma_iband_k(ibd)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)+ &
                      sigt/dble(number_group_operators)*minusdfde*wtk
                enddo
             enddo
@@ -2007,22 +2090,25 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
       end subroutine mr_accumulate_rk4
 
 !==========================================================================
-      subroutine mr_accumulate_adapt(EE, wtk, vk, iorb, Bcl_o, Bfz_o, recs_o, nrec_o)
-         !> Gauss-Legendre accumulation of the Chambers integral from the
-         !> recorded DOPRI5 steps. Panels follow the integrator's own step
-         !> sizes (width <= CWR*|h|), with a geometric floor tied to the
-         !> smallest relaxation time so that the exponential is resolved.
-         implicit none
-         real(dp), intent(in) :: EE, wtk, vk(3)
-         integer, intent(in) :: iorb
-         real(dp), intent(in) :: Bcl_o, Bfz_o
-         integer, intent(in) :: nrec_o
-         real(dp), intent(in) :: recs_o(:, :)
+       subroutine mr_accumulate_adapt(ibd, EE, wtk, vk, iorb, Bcl_o, Bfz_o, recs_o, nrec_o)
+          !> Gauss-Legendre accumulation of the Chambers integral from the
+          !> recorded DOPRI5 steps. Panels follow the integrator's own step
+          !> sizes (width <= CWR*|h|), with a geometric floor tied to the
+          !> smallest relaxation time so that the exponential is resolved.
+          implicit none
+          integer, intent(in) :: ibd
+          real(dp), intent(in) :: EE, wtk, vk(3)
+          integer, intent(in) :: iorb
+          real(dp), intent(in) :: Bcl_o, Bfz_o
+          integer, intent(in) :: nrec_o
+          real(dp), intent(in) :: recs_o(:, :)
 
-         integer, parameter :: ST_OPEN=1, ST_CONST=2, ST_CLOSED=3, ST_FRZ=4, ST_FAIL=5
-         integer :: ibtau, ie, ikt, nnode, n0, mm, mmc, jst, mfrz, nbnd, nbdim
-         real(dp) :: BTau, KBT, mu, minusdfde, lam, lameff, bdom, db, w1, CWR
-         real(dp) :: sfac, p, q, hstep, vbar(3), sigt(9), csum(3)
+          integer, parameter :: ST_OPEN=1, ST_CONST=2, ST_CLOSED=3, ST_FRZ=4, ST_FAIL=5
+          integer :: ibtau, ie, ikt, nnode, n0, mm, mmc, jst, mfrz, nbnd, nbdim
+          integer, allocatable :: ibs(:)
+          real(dp) :: BTau, KBT, mu, minusdfde, lam, lameff, bdom, db, w1, CWR
+          real(dp) :: bmax_tr
+          real(dp) :: sfac, p, q, hstep, vbar(3), sigt(9), csum(3)
          real(dp), allocatable :: bnd(:), bn(:), wn(:), kn(:, :), vn(:, :)
          real(dp), allocatable :: ks(:, :), vst(:, :), kdst(:, :), Est(:)
 
@@ -2034,31 +2120,32 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                   mu= mu_array(ie)
                   call minusdfde_calc_single(EE, KBT, mu, minusdfde)
                   call mr_symm_dyad(vk, vk, sigt)
-                  sigma_iband_k(iband)%sigma_ohe_tensor_k_mpi(:, 1, ie, ikt)= &
-                     sigma_iband_k(iband)%sigma_ohe_tensor_k_mpi(:, 1, ie, ikt)+ &
+                  sigma_iband_k(ibd)%sigma_ohe_tensor_k_mpi(:, 1, ie, ikt)= &
+                     sigma_iband_k(ibd)%sigma_ohe_tensor_k_mpi(:, 1, ie, ikt)+ &
                      sigt/dble(number_group_operators)*minusdfde*wtk
                enddo
             enddo
             return
          endif
 
-         db= exponent_max*BTauMax/NSlice_Btau
-         w1= BTauMax/dble(NBTau-1)
-         !> panel width in units of the local integrator step
-         CWR= 1.6d0*(MR_QuadTol/max(MR_ODEtol, 1d-14))**0.2d0
-         CWR= min(max(CWR, 1d0), 64d0)
+          db= exponent_max*BTauMax/NSlice_Btau
+          w1= BTauMax/dble(NBTau-1)
+          bmax_tr= min(exponent_max, MR_ExponentMax)*BTauMax
+          !> panel width in units of the local integrator step
+          CWR= 1.6d0*(MR_QuadTol/max(MR_ODEtol, 1d-14))**0.2d0
+          CWR= min(max(CWR, 1d0), 64d0)
 
-         if (iorb==ST_FAIL) return
+          if (iorb==ST_FAIL) return
 
-         if (iorb==ST_CLOSED) then
-            bdom= Bcl_o
-         elseif (iorb==ST_FRZ) then
-            mfrz= max(2, int(Bfz_o/db)+1)
-            bdom= min(mfrz*db, Bfz_o)
-         else
-            mfrz= 0
-            bdom= exponent_max*BTauMax
-         endif
+          if (iorb==ST_CLOSED) then
+             bdom= Bcl_o
+          elseif (iorb==ST_FRZ) then
+             mfrz= max(2, int(Bfz_o/db)+1)
+             bdom= min(mfrz*db, Bfz_o)
+          else
+             mfrz= 0
+             bdom= bmax_tr
+          endif
 
          if (nrec_o<1 .or. bdom<=0d0) then
             !> no recorded steps : fall back to the constant-velocity value
@@ -2067,16 +2154,16 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                do ie= 1, OmegaNum
                   mu= mu_array(ie)
                   call minusdfde_calc_single(EE, KBT, mu, minusdfde)
-                  do ibtau= 1, NBTau
-                     BTau= BTau_array(ibtau)
-                     if (BTau>eps3) then
-                        vbar= vk*mr_one_m_exp(exponent_max*BTauMax/BTau)
-                     else
-                        vbar= vk
+                   do ibtau= 1, NBTau
+                      BTau= BTau_array(ibtau)
+                      if (BTau>eps3) then
+                         vbar= vk*mr_one_m_exp(bmax_tr/BTau)
+                      else
+                         vbar= vk
                      endif
                      call mr_symm_dyad(vk, vbar, sigt)
-                     sigma_iband_k(iband)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)= &
-                        sigma_iband_k(iband)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)+ &
+                     sigma_iband_k(ibd)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)= &
+                        sigma_iband_k(ibd)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)+ &
                         sigt/dble(number_group_operators)*minusdfde*wtk
                   enddo
                enddo
@@ -2125,20 +2212,22 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
              enddo
           enddo
 
-         !> batched velocity on the nodes
+         !> batched velocity on the nodes (single orbit -> single band)
          allocate(ks(3, mr_mchunk), vst(3, mr_mchunk), kdst(3, mr_mchunk), Est(mr_mchunk))
+         allocate(ibs(mr_mchunk))
+         ibs(1:mr_mchunk)= bands_fermi_level(ibd)
          vn= 0d0
          do n0= 1, nnode, mr_mchunk
             mmc= min(mr_mchunk, nnode- n0+ 1)
             do mm= 1, mmc
                ks(:, mm)= kn(:, n0+ mm-1)
             enddo
-            call mr_eval_batch(mmc, bands_fermi_level(iband), ks, vst, kdst, Est)
+            call mr_eval_batch(mmc, ibs, ks, vst, kdst, Est)
             do mm= 1, mmc
                vn(:, n0+ mm-1)= vst(:, mm)
             enddo
          enddo
-         deallocate(ks, vst, kdst, Est)
+         deallocate(ks, vst, kdst, Est, ibs)
 
          !> weighted sums for every relaxation time
          do ikt= 1, NumT
@@ -2171,8 +2260,8 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                      vbar= vk
                   endif
                   call mr_symm_dyad(vk, vbar, sigt)
-                  sigma_iband_k(iband)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)= &
-                     sigma_iband_k(iband)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)+ &
+                  sigma_iband_k(ibd)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)= &
+                     sigma_iband_k(ibd)%sigma_ohe_tensor_k_mpi(:, ibtau, ie, ikt)+ &
                      sigt/dble(number_group_operators)*minusdfde*wtk
                enddo
             enddo
