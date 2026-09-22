@@ -1422,6 +1422,18 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                enddo
             endif
 
+            if (cpuid==0) then
+               do o= 1, mcount
+                  if (MR_algo=='RK4') then
+                     write(stdout, '(a, i4, a, 3f9.4, a, i4, a, i7, a, i7)') &
+                        '>> MR orbit : o=', o, ' k0=', k0s(:, o), ' class=', orbs(o), ' icyc=', icyc(o), ' frz=', frz(o)
+                  else
+                     write(stdout, '(a, i4, a, 3f9.4, a, i4, a, es10.2, a, es10.2, a, i7)') &
+                        '>> MR orbit : o=', o, ' k0=', k0s(:, o), ' class=', orbs(o), ' Bcl=', Bcl(o), ' Bfz=', Bfz(o), ' nrec=', nrec(o)
+                  endif
+               enddo
+            endif
+
             call now(time_end)
             tchunk= time_end- time_start
             do o= 1, mcount
@@ -1494,55 +1506,10 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
             endif
          enddo
 
-         do im= 2, NSlice_Btau
-            if (nact==0) exit
+          do im= 2, NSlice_Btau
+             if (nact==0) exit
 
-            !> freeze check at grid im (legacy checks it first)
-            ia= 1
-            do while (ia<=nact)
-               o= act(ia)
-               if (sum(abs(kdc(:, o)))<eps6) then
-                  orbs(o)= ST_FRZ
-                  frz(o)= im
-                  mr_nfrozen= mr_nfrozen+ 1
-                  act(ia)= act(nact); nact= nact-1
-                  cycle
-               endif
-               ia= ia+ 1
-            enddo
-
-            !> reference distance from the grid-2 point (legacy : it>2)
-            do ia= 1, nact
-               o= act(ia)
-               if (im==2) then
-                  kk2(:, o)= ycur(:, o)
-                  call periodic_diff(kk2(:, o), kk1(:, o), kdiff)
-                  dsm(o)= norm(kdiff)/RKF45_PERIODIC_LEVEL
-               endif
-            enddo
-
-            !> legacy exits right after storing the last grid point
-            if (im==NSlice_Btau) exit
-
-            !> closure for 10 < im <= Nsl-1 (legacy : icycle= it- 1)
-            if (im>10) then
-               ia= 1
-               do while (ia<=nact)
-                  o= act(ia)
-                  call periodic_diff(ycur(:, o), kk1(:, o), kdiff)
-                  if (norm(kdiff)<dsm(o)) then
-                     orbs(o)= ST_CLOSED
-                     icyc(o)= im- 1
-                     mr_nclosed= mr_nclosed+ 1
-                     act(ia)= act(nact); nact= nact- 1
-                     cycle
-                  endif
-                  ia= ia+ 1
-               enddo
-            endif
-            if (nact==0) exit
-
-            !> RK4 step from grid im to grid im+1 (4 batched evaluations)
+            !> RK4 step from grid im-1 to grid im (4 batched evaluations)
             do ia= 1, nact
                o= act(ia)
                ys(:, ia)= ycur(:, o)+ 0.5d0*h*kdc(:, o)
@@ -1568,12 +1535,56 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
             call mr_eval_batch(nact, iband_g, ys, vst, kdst, Est)
             do ia= 1, nact
                o= act(ia)
-               vs(:, im+1, o)= vst(:, ia)
+               vs(:, im, o)= vst(:, ia)
                kdc(:, o)= kdst(:, ia)
                ycur(:, o)= ys(:, ia)
             enddo
-         enddo
 
+            !> freeze check at grid im (legacy checks it first)
+            ia= 1
+            do while (ia<=nact)
+               o= act(ia)
+               if (sum(abs(kdc(:, o)))<eps6) then
+                  orbs(o)= ST_FRZ
+                  frz(o)= im
+                  mr_nfrozen= mr_nfrozen+ 1
+                  act(ia)= act(nact); nact= nact-1
+                  cycle
+               endif
+               ia= ia+ 1
+            enddo
+
+             !> reference distance from the grid-2 point (legacy : kout(:,2))
+             if (im==2) then
+                do ia= 1, nact
+                   o= act(ia)
+                   kk2(:, o)= ycur(:, o)
+                   call periodic_diff(kk2(:, o), kk1(:, o), kdiff)
+                   dsm(o)= norm(kdiff)/RKF45_PERIODIC_LEVEL
+                enddo
+             endif
+
+            !> legacy exits right after storing the last grid point
+            if (im==NSlice_Btau) exit
+
+            !> closure for 10 < im <= Nsl-1 (legacy : icycle= it- 1)
+            if (im>10) then
+               ia= 1
+               do while (ia<=nact)
+                  o= act(ia)
+                  call periodic_diff(ycur(:, o), kk1(:, o), kdiff)
+                  if (norm(kdiff)<dsm(o)) then
+                     orbs(o)= ST_CLOSED
+                     icyc(o)= im- 1
+                     mr_nclosed= mr_nclosed+ 1
+                     act(ia)= act(nact); nact= nact- 1
+                     cycle
+                  endif
+                  ia= ia+ 1
+               enddo
+            endif
+            if (nact==0) exit
+          enddo
          !> fill the closed orbits by periodic copying (legacy semantics)
          do o= 1, M
             if (orbs(o)==ST_CLOSED) then
@@ -1620,8 +1631,9 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
          integer :: o, ia, i, j, nact
          real(dp) :: rtol, atol, db, b_end, est, sk, err, fac11, fac, hnew, bnw
          real(dp) :: kdiff(3), vc(3)
-         integer :: act(M), natt(M)
+         integer :: act(M), natt(M), mgrid(M)
          logical :: marching(M), kk2ok(M)
+         real(dp) :: ggrid, fgrid, fg1, kdint(3)
          real(dp) :: y(3, M), k1(3, M), bb(M), hh(M), fold(M), dsm(M)
          real(dp) :: kk1(3, M), kk2(3, M)
          real(dp) :: yA(3, M), y5(3, M), vA(3, M), EA(M)
@@ -1657,6 +1669,7 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                k1(:, o)= kd0s(:, o)
                kk1(:, o)= k0s(:, o)
                bb(o)= 0d0
+               mgrid(o)= 1
                hh(o)= -db
                fold(o)= 1d-4
                dsm(o)= huge(1d0)
@@ -1777,20 +1790,44 @@ subroutine sigma_ohe_calc_symm(mu_array, KBT_array, BTau_array, Nband_Fermi_Leve
                      dsm(o)= norm(kdiff)/RKF45_PERIODIC_LEVEL
                   endif
 
+                  !> grid-aligned freeze check (legacy semantics : the test
+                  !  runs on kdot at every grid arrival; here kdot is
+                  !  interpolated linearly between the step endpoints, so no
+                  !  extra velocity evaluations are needed)
+                  do while (mgrid(o)<=NSlice_Btau)
+                     ggrid= -mgrid(o)*db
+                     if (ggrid< bnw- 1d-9*db) exit
+                     if (ggrid> bb(o)+ 1d-9*db) then
+                        mgrid(o)= mgrid(o)+ 1
+                        cycle
+                     endif
+                     !> CONTD5 polynomial derivative at the grid point
+                     !  (exact at the step endpoints, 4th order inside)
+                     fgrid= (ggrid- bb(o))/hh(o)
+                     fg1= 1d0- fgrid
+                     do i= 1, 3
+                        kdint(i)= (recs(5+i, j, o) &
+                           + (fg1- fgrid)*(recs(8+i, j, o) &
+                           + fgrid*(recs(11+i, j, o)+ fg1*recs(14+i, j, o))) &
+                           + fgrid*fg1*(recs(11+i, j, o) &
+                           + (1d0- 2d0*fgrid)*recs(14+i, j, o)))/hh(o)
+                     enddo
+                     if (sum(abs(kdint))<eps6) then
+                        orbs(o)= ST_FRZ
+                        Bfz(o)= mgrid(o)*db*(1d0- 1d-9)
+                        marching(o)= .false.
+                        mr_nfrozen= mr_nfrozen+ 1
+                        exit
+                     endif
+                     mgrid(o)= mgrid(o)+ 1
+                  enddo
+                  if (.not. marching(o)) cycle
+
                   y(:, o)= y5(:, ia)
                   k1(:, o)= k7(:, ia)
                   bb(o)= bnw
                   fold(o)= max(err, 1d-4)
                   hh(o)= hnew
-
-                  !> freeze at the arrival point (legacy checks it first)
-                  if (sum(abs(k7(:, ia)))<eps6) then
-                     orbs(o)= ST_FRZ
-                     Bfz(o)= abs(bnw)
-                     marching(o)= .false.
-                     mr_nfrozen= mr_nfrozen+ 1
-                     cycle
-                  endif
 
                   !> closure beyond 10 legacy grid steps
                   if (kk2ok(o) .and. abs(bnw)>10d0*db) then
