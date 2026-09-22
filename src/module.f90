@@ -573,9 +573,19 @@
      !> magnetic field times time in units of Tesla*ps
      real(dp) :: BTauMax, Relaxation_Time_Tau
      integer :: NBTau, BTauNum  
-     integer :: Nslice_BTau_Max
+      integer :: Nslice_BTau_Max
 
-     real(dp) :: symprec= 1E-4
+      !> algorithm used to integrate the magnetic orbits in sigma_ohe_calc_symm
+      !> 'RKF45' : the legacy RKF45-pack trajectory integrator (default, bitwise legacy)
+      !> 'RK4'   : fixed-grid classical RK4 with batched eigensolves (lockstep over orbits)
+      !> 'ADAPT' : adaptive DOPRI5(4) with dense output and Gauss-panel quadrature
+      character(20) :: MR_algo
+      !> relative tolerance of the adaptive ODE integrator (MR_algo='ADAPT')
+      real(dp) :: MR_ODEtol
+      !> target relative tolerance of the panel quadrature (MR_algo='ADAPT')
+      real(dp) :: MR_QuadTol
+
+      real(dp) :: symprec= 1E-4
 
      !> cut of radial for summation over R vectors
      real(dp) :: Rcut
@@ -632,7 +642,8 @@
      !> namelist parameters
      namelist /PARAMETERS/ E_arc, Fermi_broadening, EF_integral_range, OmegaNum, OmegaNum_unfold, OmegaMin, OmegaMax, &
         Eta_Arc, iso_energy, Nk1, Nk2, Nk3, NP, Gap_threshold, Tmin, Tmax, NumT, &
-        NBTau, BTauNum, BTauMax, Rcut, Magp, Magq, Magp_min, Magp_max, Nslice_BTau_Max, &
+         NBTau, BTauNum, BTauMax, Rcut, Magp, Magq, Magp_min, Magp_max, Nslice_BTau_Max, &
+         MR_algo, MR_ODEtol, MR_QuadTol, &
         wcc_neighbour_tol, wcc_calc_tol, Beta,NumLCZVecs, iprint_level, &
         Relaxation_Time_Tau,  symprec, arpack_solver, RKF45_PERIODIC_LEVEL, &
         NumRandomConfs, NumSelectedEigenVals, projection_weight_mode, topsurface_atom_index, &

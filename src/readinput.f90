@@ -603,7 +603,10 @@ subroutine readinput
    NumT= 1
    NBTau = 1
    BTauNum = 1
-   Nslice_BTau_Max = 5000
+    Nslice_BTau_Max = 5000
+    MR_algo = 'RKF45'
+    MR_ODEtol = 1d-10
+    MR_QuadTol = 1d-6
    BTauMax = 0d0
    Rcut = 999999d0
    Magp= 1
@@ -667,7 +670,13 @@ subroutine readinput
 
    NBTau= max(NBTau, BTauNum)
   
-   projection_weight_mode= upper(projection_weight_mode)
+    projection_weight_mode= upper(projection_weight_mode)
+    MR_algo= upper(MR_algo)
+    if (MR_algo/='RKF45' .and. MR_algo/='RK4' .and. MR_algo/='ADAPT') then
+       write(stdout,*) '>>> WARNING : unknown MR_algo "', trim(MR_algo), &
+            '", fall back to RKF45'
+       MR_algo= 'RKF45'
+    endif
    if (cpuid==0) then
       write(stdout, *) "  "
       write(stdout, *) ">>>calculation parameters : "
@@ -690,6 +699,9 @@ subroutine readinput
       write(stdout, '(1x, a, i6   )')'NBTau  : ', NBTau
       write(stdout, '(1x, a, f16.5)')'Beta  : ', Beta
       write(stdout, '(1x, a, i6   )')'Nslice_BTau_Max  : ', Nslice_BTau_Max
+      write(stdout, '(1x, a, a     )')'MR_algo : ', trim(MR_algo)
+      write(stdout, '(1x, a, es16.5)')'MR_ODEtol : ', MR_ODEtol
+      write(stdout, '(1x, a, es16.5)')'MR_QuadTol : ', MR_QuadTol
       write(stdout, '(1x, a, f16.5)')'BTauMax(Tesla.ps)', BTauMax
       write(stdout, '(1x, a, f16.5)')'Relaxation_Time_Tau (ps)', Relaxation_Time_Tau
       write(stdout, '(1x, a, f16.5)')'Rcut', Rcut
